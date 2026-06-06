@@ -22,6 +22,8 @@
                   <mainClass>com.sheetmusic.Main</mainClass>
                 </transformer>
               </transformers>
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>shaded</shadedClassifierName>
               <filters>
                 <filter>
                   <artifact>*:*</artifact>
@@ -38,9 +40,15 @@
       </plugin>
     </plugins>
   </build>
+  <repositories>
+    <repository>
+      <id>opencv</id>
+      <url>https://repo1.maven.org/maven2</url>
+    </repository>
+  </repositories>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.target>17</maven.compiler.target>
-    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <maven.compiler.source>21</maven.compiler.source>
   </properties>
 </project>

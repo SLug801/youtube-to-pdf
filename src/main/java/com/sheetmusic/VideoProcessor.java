@@ -1,7 +1,11 @@
 package com.sheetmusic;
 
-import java.nio.file.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 public class VideoProcessor {
 
@@ -41,6 +45,91 @@ public class VideoProcessor {
         System.out.println("[정리] 영상 파일 삭제됨 → 결과물: " + workDir + "/");
 
         return pdfPath.toString();
+    }
+
+    public static String process(
+            String url,
+            String title,
+            Path outputPdf,
+            double threshold,
+            FrameExtractor.RoiConfig roi,
+            ProgressLogger logger
+    ) throws Exception {
+        return process(url, title, outputPdf, threshold, roi, logger, null);
+    }
+
+    public static String process(
+            String url,
+            String title,
+            Path outputPdf,
+            double threshold,
+            FrameExtractor.RoiConfig roi,
+            ProgressLogger logger,
+            javax.swing.SwingWorker<?, ?> worker
+    ) throws Exception {
+        if (logger == null) {
+            logger = ProgressLogger.console();
+        }
+
+        Path parent = outputPdf.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+
+        Path workDir = Files.createTempDirectory("ytpdf-work-");
+        Path framesDir = workDir.resolve(Config.FRAMES_DIR);
+        final ProgressLogger finalLogger = logger;
+        final Path finalOutputPdf = outputPdf;
+        
+        try {
+            // 취소 확인
+            if (worker != null && worker.isCancelled()) {
+                throw new InterruptedException("작업이 취소되었습니다.");
+            }
+
+            finalLogger.log("[작업] 임시 디렉터리: " + workDir);
+            Path videoFile = YtDlpDownloader.download(url, workDir, finalLogger);
+            
+            // 취소 확인
+            if (worker != null && worker.isCancelled()) {
+                throw new InterruptedException("작업이 취소되었습니다.");
+            }
+
+            FrameExtractor extractor = new FrameExtractor(threshold, roi);
+            List<Path> frames = extractor.extract(videoFile, framesDir, finalLogger);
+            
+            // 취소 확인
+            if (worker != null && worker.isCancelled()) {
+                throw new InterruptedException("작업이 취소되었습니다.");
+            }
+
+            finalLogger.log("[PDF 생성] " + frames.size() + "장의 이미지를 PDF로 변환 중...");
+            PdfBuilder.build(frames, finalOutputPdf, finalLogger, (current, total) -> {
+                finalLogger.log(String.format("[PDF] %.0f%% (%d/%d)", (double)current/total*100, current, total));
+            });
+            
+            Files.deleteIfExists(videoFile);
+            finalLogger.log("[정리] 영상 파일 삭제됨 → 결과물: " + finalOutputPdf);
+            return finalOutputPdf.toString();
+        } finally {
+            deleteDirectory(workDir);
+        }
+    }
+
+    private static void deleteDirectory(Path root) {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> stream = Files.walk(root)) {
+            stream.sorted(Comparator.reverseOrder())
+                  .forEach(path -> {
+                      try {
+                          Files.deleteIfExists(path);
+                      } catch (IOException ignored) {
+                      }
+                  });
+        } catch (IOException ignored) {
+        }
     }
 
     // threshold만 받는 오버로드 (기본 ROI 사용)

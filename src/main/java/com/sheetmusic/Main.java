@@ -15,8 +15,13 @@ import java.util.*;
 public class Main {
 
     public static void main(String[] args) {
-        if (args.length == 0) {
-            printHelp();
+        // JNA가 시스템 설치 라이브러리보다 프로젝트 내장 라이브러리를 우선하도록 설정
+        // (Invalid memory access 오류 방지 핵심 설정)
+        System.setProperty("jna.nosys", "true");
+        System.setProperty("jna.protected", "true");
+
+        if (args.length == 0 || (args.length == 1 && "--gui".equals(args[0]))) {
+            GuiApp.show();
             return;
         }
 
@@ -78,6 +83,7 @@ public class Main {
                 ╚══════════════════════════════════════════════════╝
 
                 사용법:
+                  java -jar youtube-to-pdf.jar --gui
                   java -jar youtube-to-pdf.jar <URL> [URL...]
                   java -jar youtube-to-pdf.jar --file urls.txt
                   java -jar youtube-to-pdf.jar --threshold 0.95 --roi 0.65,1.00,0.00,1.00 <URL>
