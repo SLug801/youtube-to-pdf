@@ -1,8 +1,10 @@
 package com.sheetmusic;
 
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * YouTube 악보 영상 → PDF 변환 도구
@@ -28,13 +30,40 @@ public class Main {
         List<String> urls = new ArrayList<>();
         double threshold = Config.SIMILARITY_THRESHOLD;
         FrameExtractor.RoiConfig roi = FrameExtractor.RoiConfig.defaultConfig();
+        double contrast = 1.0;
+        int totalMeasures = 0;
         String filePath = null;
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "--file", "-f"      -> { if (i + 1 < args.length) filePath = args[++i]; }
-                case "--threshold", "-t" -> { if (i + 1 < args.length) threshold = Double.parseDouble(args[++i]); }
-                case "--roi", "-r"       -> { if (i + 1 < args.length) roi = FrameExtractor.RoiConfig.parse(args[++i]); }
+                case "--file", "-f"      -> { 
+                    if (i + 1 < args.length) filePath = args[++i]; 
+                    else System.err.println("[경고] --file 옵션 뒤에 경로가 누락되었습니다.");
+                }
+                case "--threshold", "-t" -> { 
+                    if (i + 1 < args.length) {
+                        try { threshold = Double.parseDouble(args[++i]); }
+                        catch (NumberFormatException e) { System.err.println("[경고] 유사도 임계값이 숫자가 아닙니다. 기본값을 사용합니다."); }
+                    } else System.err.println("[경고] --threshold 옵션 뒤에 값이 누락되었습니다.");
+                }
+                case "--roi", "-r"       -> { 
+                    if (i + 1 < args.length) {
+                        try { roi = FrameExtractor.RoiConfig.parse(args[++i]); }
+                        catch (Exception e) { System.err.println("[경고] ROI 형식이 올바르지 않습니다. 기본값을 사용합니다."); }
+                    } else System.err.println("[경고] --roi 옵션 뒤에 설정값이 누락되었습니다.");
+                }
+                case "--measures", "-m"   -> {
+                    if (i + 1 < args.length) {
+                        try { totalMeasures = Integer.parseInt(args[++i]); }
+                        catch (NumberFormatException e) { System.err.println("[경고] 마디 수는 숫자여야 합니다."); }
+                    }
+                }
+                case "--contrast", "-c"   -> {
+                    if (i + 1 < args.length) {
+                        try { contrast = Double.parseDouble(args[++i]); }
+                        catch (NumberFormatException e) { System.err.println("[경고] 대비 값은 숫자여야 합니다."); }
+                    }
+                }
                 case "--help", "-h"      -> { printHelp(); return; }
                 default                  -> urls.add(args[i]);
             }
@@ -64,7 +93,8 @@ public class Main {
             String url = urls.get(i);
             System.out.printf("%n[%d/%d] %s%n", i + 1, urls.size(), url);
             try {
-                String pdf = VideoProcessor.process(url, String.format("yorushika_%02d", i + 1), threshold, roi);
+                String baseFileName = String.format("sheet_%02d", i + 1);
+                String pdf = VideoProcessor.process(url, baseFileName, threshold, roi, totalMeasures, contrast);
                 System.out.println("✅ 완료: " + pdf);
                 success++;
             } catch (Exception e) {

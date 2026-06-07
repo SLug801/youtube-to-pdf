@@ -21,8 +21,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.function.Consumer;
 
+import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JSlider;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -41,6 +43,8 @@ public class GuiApp {
     private JFrame frame;
     private JTextField urlField;
     private JTextField filenameField;
+    private JTextField measureField;
+    private JSlider contrastSlider;
     private JTextField folderField;
     private JButton previewButton;
     private JButton convertButton;
@@ -103,6 +107,21 @@ public class GuiApp {
         buttonRow.add(cancelButton);
         gbc.gridy = row++;
         panel.add(buttonRow, gbc);
+
+        gbc.gridy = row++;
+        panel.add(new JLabel("전체 마디 수 (정확한 종료를 위해 입력):"), gbc);
+
+        measureField = new JTextField("64");
+        gbc.gridy = row++;
+        panel.add(measureField, gbc);
+
+        gbc.gridy = row++;
+        panel.add(new JLabel("이미지 대비 (투명 타브 대응):"), gbc);
+        contrastSlider = new JSlider(50, 300, 100); // 0.5 ~ 3.0배 (기본 1.0)
+        contrastSlider.setMajorTickSpacing(50);
+        contrastSlider.setPaintTicks(true);
+        gbc.gridy = row++;
+        panel.add(contrastSlider, gbc);
 
         gbc.gridy = row++;
         panel.add(new JLabel("변환할 파일명:"), gbc);
@@ -239,6 +258,15 @@ public class GuiApp {
             return;
         }
 
+        int totalMeasures = 0;
+        try {
+            totalMeasures = Integer.parseInt(measureField.getText().trim());
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(frame, "마디 수는 숫자로 입력해주세요.", "입력 오류", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        final double contrast = contrastSlider.getValue() / 100.0;
         final String filename = filenameField.getText().trim();
         if (filename.isEmpty()) {
             JOptionPane.showMessageDialog(frame, "파일명을 입력해주세요.", "입력 필요", JOptionPane.WARNING_MESSAGE);
@@ -266,16 +294,22 @@ public class GuiApp {
         appendLog("변환 시작... 최종 PDF를 생성합니다.");
         statusLabel.setText("변환 중...");
 
+        final int finalMeasures = totalMeasures;
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
-                return VideoProcessor.process(url, pdfFilename.replaceAll("\\.pdf$", ""), outputPdf, Config.SIMILARITY_THRESHOLD, currentRoi, message -> publish(message), this);
+                return VideoProcessor.process(url, pdfFilename.replaceAll("\\.pdf$", ""), outputPdf, Config.SIMILARITY_THRESHOLD, currentRoi, message -> publish(message), this, finalMeasures, contrast);
             }
 
             @Override
             protected void process(java.util.List<String> chunks) {
                 for (String line : chunks) {
-                    appendLog(line);
+                    if (line.startsWith("FRAME_SAVED:")) {
+                        String pathStr = line.substring(12);
+                        updateCapturedPreview(pathStr);
+                    } else {
+                        appendLog(line);
+                    }
                 }
             }
 
@@ -301,6 +335,17 @@ public class GuiApp {
             }
         };
         currentWorker.execute();
+    }
+
+    private void updateCapturedPreview(String pathStr) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                BufferedImage img = ImageIO.read(Paths.get(pathStr).toFile());
+                previewPanel.setImage(img);
+                statusLabel.setText("실시간 캡처 중: " + Paths.get(pathStr).getFileName());
+            } catch (IOException ignored) {
+            }
+        });
     }
 
     private void cancelConversion() {

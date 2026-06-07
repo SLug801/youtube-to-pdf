@@ -54,13 +54,16 @@ public class PdfBuilder {
                 
                 float imgW = img.getWidth();
                 float imgH = img.getHeight();
-                
-                // 이미지를 페이지 너비에 맞게 스케일
-                float scale = availableWidth / imgW;
-                float drawW = availableWidth;
-                float drawH = imgH * scale;
 
-                // 페이지에 맞는지 확인
+                // 이미지 한 장이 한 줄 전체를 차지하도록 배율 계산
+                float currentScale = availableWidth / imgW;
+                float drawW = availableWidth;
+                float drawH = imgH * currentScale;
+
+                // 무조건 새로운 줄로 배치 (1이미지 = 1줄 = 4마디)
+                // 만약 현재 페이지에 공간이 없으면 새 페이지
+
+                // 세로 공간이 부족하면 새 페이지로
                 if (currentY - drawH < margin) {
                     // 새 페이지 시작
                     cs.close();
@@ -70,11 +73,9 @@ public class PdfBuilder {
                     currentY = pageH - margin;
                 }
 
-                // 이미지 그리기
-                float x = margin;
-                float y = currentY - drawH;
-                cs.drawImage(img, x, y, drawW, drawH);
-                currentY -= drawH + 5; // 5pt 간격
+                // 왼쪽 마진에 맞춰 그리고 다음 줄로 이동
+                cs.drawImage(img, margin, currentY - drawH, drawW, drawH);
+                currentY -= (drawH + 25); // 줄 사이 간격을 25pt로 넉넉히 배치
 
                 imageCount++;
                 if (callback != null && imageCount % 5 == 0) {
