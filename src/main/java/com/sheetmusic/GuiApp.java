@@ -15,7 +15,9 @@ import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.awt.image.RescaleOp;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -24,13 +26,13 @@ import java.util.function.Consumer;
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
-import javax.swing.JSlider;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSlider;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -38,13 +40,16 @@ import javax.swing.SwingWorker;
 import javax.swing.border.TitledBorder;
 import javax.swing.text.DefaultCaret;
 
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.imgproc.Imgproc;
+
 public class GuiApp {
 
     private JFrame frame;
     private JTextField urlField;
     private JTextField filenameField;
     private JTextField measureField;
-    private JSlider contrastSlider;
     private JTextField folderField;
     private JButton previewButton;
     private JButton convertButton;
@@ -54,6 +59,10 @@ public class GuiApp {
     private JLabel statusLabel;
     private PreviewPanel previewPanel;
     private JTextArea logArea;
+    private BufferedImage originalPreviewImage;
+    private JSlider brightnessSlider;
+    private JLabel brightnessValLabel;
+    private boolean isColorInverted = false;
     private FrameExtractor.RoiConfig currentRoi = FrameExtractor.RoiConfig.defaultConfig();
     private SwingWorker<?, ?> currentWorker = null;
 
@@ -109,19 +118,41 @@ public class GuiApp {
         panel.add(buttonRow, gbc);
 
         gbc.gridy = row++;
+        panel.add(new JLabel("타브 악보 색상 선택 (배경 반전):"), gbc);
+        JPanel colorBtnRow = new JPanel(new GridLayout(1, 2, 8, 0));
+        JButton whiteBtn = new JButton("흰색 배경 (기본)");
+        JButton blackBtn = new JButton("검정 배경 (반전)");
+        whiteBtn.addActionListener(e -> setInversion(false));
+        blackBtn.addActionListener(e -> setInversion(true));
+        colorBtnRow.add(whiteBtn);
+        colorBtnRow.add(blackBtn);
+        gbc.gridy = row++;
+        panel.add(colorBtnRow, gbc);
+
+        gbc.gridy = row++;
+        panel.add(new JLabel("무시할 명도값 (기준 이하 검정색):"), gbc);
+        
+        JPanel sliderPanel = new JPanel(new BorderLayout());
+        brightnessSlider = new JSlider(0, 100, 0);
+        brightnessSlider.setMajorTickSpacing(20);
+        brightnessSlider.setMinorTickSpacing(5);
+        brightnessSlider.setPaintTicks(true);
+        brightnessValLabel = new JLabel("0");
+        brightnessSlider.addChangeListener(e -> {
+            brightnessValLabel.setText(String.valueOf(brightnessSlider.getValue()));
+            applyColorMode(); // 슬라이더 조절 시 프리뷰 즉시 반영
+        });
+        sliderPanel.add(brightnessSlider, BorderLayout.CENTER);
+        sliderPanel.add(brightnessValLabel, BorderLayout.EAST);
+        gbc.gridy = row++;
+        panel.add(sliderPanel, gbc);
+
+        gbc.gridy = row++;
         panel.add(new JLabel("전체 마디 수 (정확한 종료를 위해 입력):"), gbc);
 
         measureField = new JTextField("64");
         gbc.gridy = row++;
         panel.add(measureField, gbc);
-
-        gbc.gridy = row++;
-        panel.add(new JLabel("이미지 대비 (투명 타브 대응):"), gbc);
-        contrastSlider = new JSlider(50, 300, 100); // 0.5 ~ 3.0배 (기본 1.0)
-        contrastSlider.setMajorTickSpacing(50);
-        contrastSlider.setPaintTicks(true);
-        gbc.gridy = row++;
-        panel.add(contrastSlider, gbc);
 
         gbc.gridy = row++;
         panel.add(new JLabel("변환할 파일명:"), gbc);
@@ -226,7 +257,8 @@ public class GuiApp {
             protected void done() {
                 try {
                     BufferedImage image = get();
-                    previewPanel.setImage(image);
+                    originalPreviewImage = image;
+                    applyColorMode();
                     appendLog("프리뷰 준비 완료했습니다. 관심 있는 영역을 드래그로 선택하세요.");
                     statusLabel.setText("프리뷰 로드 완료");
                 } catch (Exception e) {
@@ -266,7 +298,6 @@ public class GuiApp {
             return;
         }
 
-        final double contrast = contrastSlider.getValue() / 100.0;
         final String filename = filenameField.getText().trim();
         if (filename.isEmpty()) {
             JOptionPane.showMessageDialog(frame, "파일명을 입력해주세요.", "입력 필요", JOptionPane.WARNING_MESSAGE);
@@ -298,7 +329,8 @@ public class GuiApp {
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
-                return VideoProcessor.process(url, pdfFilename.replaceAll("\\.pdf$", ""), outputPdf, Config.SIMILARITY_THRESHOLD, currentRoi, message -> publish(message), this, finalMeasures, contrast);
+                int minBrightness = brightnessSlider.getValue();
+                return VideoProcessor.process(url, pdfFilename.replaceAll("\\.pdf$", ""), outputPdf, Config.SIMILARITY_THRESHOLD, currentRoi, message -> publish(message), this, finalMeasures, minBrightness);
             }
 
             @Override
@@ -371,6 +403,73 @@ public class GuiApp {
         });
     }
 
+    private void setInversion(boolean invert) {
+        this.isColorInverted = invert;
+        if (originalPreviewImage != null) {
+            applyColorMode();
+        }
+        appendLog("배경 모드 변경: " + (invert ? "어두운 배경(반전)" : "밝은 배경(원본)"));
+    }
+
+    private void applyColorMode() {
+        if (originalPreviewImage == null) return;
+        
+        // 1. 원본 이미지 복제
+        BufferedImage processed = new BufferedImage(originalPreviewImage.getWidth(), originalPreviewImage.getHeight(), originalPreviewImage.getType());
+        Graphics g = processed.getGraphics();
+        g.drawImage(originalPreviewImage, 0, 0, null);
+        g.dispose();
+
+        // 2. 명도 임계값 처리 (OpenCV 사용)
+        int thresholdValue = brightnessSlider.getValue();
+        if (thresholdValue > 0) {
+            Mat mat = bufferedImageToMat(processed);
+            Mat gray = new Mat();
+            Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
+            
+            // 설정값 이하 명도 무시 (검정색으로)
+            Imgproc.threshold(gray, gray, thresholdValue * 2.55, 255, Imgproc.THRESH_TOZERO);
+            
+            // 결과를 다시 BGR로 변환하여 덮어쓰기
+            Imgproc.cvtColor(gray, mat, Imgproc.COLOR_GRAY2BGR);
+            processed = matToBufferedImage(mat);
+            mat.release(); gray.release();
+        }
+
+        // 3. 색상 반전 처리
+        if (isColorInverted) {
+            processed = invertImage(processed);
+        }
+        previewPanel.setImage(processed, false);
+    }
+
+    private BufferedImage invertImage(BufferedImage src) {
+        // 색상 반전을 위한 연산 (Scale -1.0, Offset 255)
+        RescaleOp op = new RescaleOp(-1.0f, 255f, null);
+        return op.filter(src, null);
+    }
+
+    private Mat bufferedImageToMat(BufferedImage bi) {
+        Mat mat = new Mat(bi.getHeight(), bi.getWidth(), CvType.CV_8UC3);
+        byte[] data = ((java.awt.image.DataBufferByte) bi.getRaster().getDataBuffer()).getData();
+        mat.put(0, 0, data);
+        return mat;
+    }
+
+    private BufferedImage matToBufferedImage(Mat mat) {
+        int type = BufferedImage.TYPE_BYTE_GRAY;
+        if (mat.channels() > 1) {
+            type = BufferedImage.TYPE_3BYTE_BGR;
+        }
+        int bufferSize = mat.channels() * mat.cols() * mat.rows();
+        byte[] b = new byte[bufferSize];
+        mat.get(0, 0, b);
+        BufferedImage image = new BufferedImage(mat.cols(), mat.rows(), type);
+        final byte[] targetPixels = ((java.awt.image.DataBufferByte) image.getRaster().getDataBuffer()).getData();
+        System.arraycopy(b, 0, targetPixels, 0, b.length);
+        return image;
+    }
+
     private void onSelectionChanged(FrameExtractor.RoiConfig roi) {
         currentRoi = roi;
         roiLabel.setText("ROI: " + roi);
@@ -438,8 +537,12 @@ public class GuiApp {
         }
 
         public void setImage(BufferedImage image) {
+            setImage(image, true);
+        }
+
+        public void setImage(BufferedImage image, boolean resetSelection) {
             this.image = image;
-            this.selection = null;
+            if (resetSelection) this.selection = null;
             repaint();
         }
 

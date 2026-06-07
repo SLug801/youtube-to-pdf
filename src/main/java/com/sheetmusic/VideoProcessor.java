@@ -19,7 +19,8 @@ public class VideoProcessor {
             double threshold,
             FrameExtractor.RoiConfig roi,
             int totalMeasures,
-            double contrast
+            double contrast,
+            int minBrightness
     ) throws Exception {
         String safeTitle = sanitizeTitle(title);
         Path workDir   = Path.of(safeTitle);
@@ -29,8 +30,25 @@ public class VideoProcessor {
         Files.createDirectories(workDir);
  
         Path videoFile = YtDlpDownloader.download(url, workDir);
-        FrameExtractor extractor = new FrameExtractor(threshold, roi, totalMeasures, contrast);
-        List<Path> frames = extractor.extract(videoFile, framesDir);
+        
+        // [자동 재시도 로직] 목표 마디 수에 도달할 때까지 명도 조절
+        FrameExtractor.ExtractionResult result = null;
+        int currentBrightness = minBrightness;
+        int attempts = 0;
+
+        while (attempts < 3) {
+            FrameExtractor extractor = new FrameExtractor(threshold, roi, totalMeasures, contrast, currentBrightness);
+            result = extractor.extract(videoFile, framesDir);
+            
+            if (totalMeasures <= 0 || result.measuresCaptured() >= totalMeasures) break;
+            
+            attempts++;
+            currentBrightness += 15; // 명도를 높여서 더 뚜렷한 선 탐지 시도
+            System.out.printf("[재시도] 마디 부족(%d/%d). 명도 조절(%d) 후 다시 시도합니다...%n", 
+                result.measuresCaptured(), totalMeasures, currentBrightness);
+        }
+
+        List<Path> frames = result.imagePaths();
         PdfBuilder.build(frames, pdfPath);
  
         Files.deleteIfExists(videoFile);
@@ -38,10 +56,33 @@ public class VideoProcessor {
         return pdfPath.toString();
     }
  
+    /**
+     * CLI용 오버로드 (대비 기본값 사용)
+     */
+    public static String process(
+            String url,
+            String title,
+            double threshold,
+            FrameExtractor.RoiConfig roi,
+            int totalMeasures,
+            double contrast
+    ) throws Exception {
+        return process(url, title, threshold, roi, totalMeasures, contrast, 0);
+    }
+
+    public static String process(
+            String url,
+            String title,
+            double threshold,
+            FrameExtractor.RoiConfig roi,
+            int totalMeasures
+    ) throws Exception {
+        return process(url, title, threshold, roi, totalMeasures, 1.0, 0);
+    }
 
     /** threshold만 받는 오버로드 (기본 ROI 사용) */
     public static String process(String url, String title, double threshold) throws Exception {
-        return process(url, title, threshold, FrameExtractor.RoiConfig.defaultConfig(), 0, 1.0);
+        return process(url, title, threshold, FrameExtractor.RoiConfig.defaultConfig(), 0);
     }
 
 
@@ -56,7 +97,7 @@ public class VideoProcessor {
                        FrameExtractor.RoiConfig roi,
             ProgressLogger logger
     ) throws Exception {
-        return process(url, title, outputPdf, threshold, roi, logger, null, 0, 1.0);
+        return process(url, title, outputPdf, threshold, roi, logger, null, 0, 0);
     }
 
 
@@ -70,7 +111,7 @@ public class VideoProcessor {
             ProgressLogger logger,
             javax.swing.SwingWorker<?, ?> worker,
             int totalMeasures,
-            double contrast
+            int minBrightness
     ) throws Exception {
         if (logger == null) logger = ProgressLogger.console();
  
@@ -92,8 +133,23 @@ public class VideoProcessor {
 
 
             // 2. 프레임 추출
-            FrameExtractor extractor = new FrameExtractor(threshold, roi, totalMeasures, contrast);
-            List<Path> frames = extractor.extract(videoFile, framesDir, log);
+            FrameExtractor.ExtractionResult result = null;
+            int currentBrightness = minBrightness;
+            int attempts = 0;
+
+            while (attempts < 3) {
+                FrameExtractor extractor = new FrameExtractor(threshold, roi, totalMeasures, 1.0, currentBrightness);
+                result = extractor.extract(videoFile, framesDir, log);
+                
+                if (totalMeasures <= 0 || result.measuresCaptured() >= totalMeasures || worker.isCancelled()) break;
+                
+                attempts++;
+                currentBrightness += 10;
+                log.log(String.format("[재시도] 마디 부족(%d/%d). 명도를 %d로 조정합니다.", 
+                    result.measuresCaptured(), totalMeasures, currentBrightness));
+            }
+
+            List<Path> frames = result.imagePaths();
             checkCancellation(worker);
 
  

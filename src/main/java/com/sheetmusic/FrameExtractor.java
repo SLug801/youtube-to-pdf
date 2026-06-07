@@ -31,6 +31,10 @@ public class FrameExtractor {
         }
     }
 
+    /** 추출 결과 정보를 담는 레코드 */
+    public record ExtractionResult(List<Path> imagePaths, int measuresCaptured) {
+    }
+
     // -------------------------------------------------------------------------
     // 튜닝 파라미터
     // -------------------------------------------------------------------------
@@ -72,18 +76,28 @@ public class FrameExtractor {
     private final RoiConfig roi;
     private final int totalMeasures;
     private final double contrast;
+    private final int minBrightness;
+
+    public FrameExtractor(double threshold, RoiConfig roi, int totalMeasures) {
+        this(threshold, roi, totalMeasures, 1.0, 0);
+    }
 
     public FrameExtractor(double threshold, RoiConfig roi, int totalMeasures, double contrast) {
+        this(threshold, roi, totalMeasures, contrast, 0);
+    }
+
+    public FrameExtractor(double threshold, RoiConfig roi, int totalMeasures, double contrast, int minBrightness) {
         this.roi = roi;
         this.totalMeasures = totalMeasures;
         this.contrast = contrast;
+        this.minBrightness = minBrightness;
     }
 
-    public List<Path> extract(Path videoPath, Path outDir) throws Exception {
+    public ExtractionResult extract(Path videoPath, Path outDir) throws Exception {
         return extract(videoPath, outDir, null);
     }
 
-    public List<Path> extract(Path videoPath, Path outDir, ProgressLogger logger) throws Exception {
+    public ExtractionResult extract(Path videoPath, Path outDir, ProgressLogger logger) throws Exception {
         Files.createDirectories(outDir);
 
         VideoCapture cap = new VideoCapture(videoPath.toString());
@@ -123,21 +137,28 @@ public class FrameExtractor {
 
             Mat roiMat     = new Mat(frame, roiRect);
             Mat cleanFrame = preprocess(roiMat);
-            roiMat.release();
 
             // ── 첫 프레임 ──────────────────────────────────────────────────
             if (lastSavedClean == null) {
                 log(logger, "[첫 프레임] frame=%d", frameIdx);
                 
-                // 첫 프레임 저장
-                Path p = saveRoi(frame, roiRect, outDir, saved.size());
+                // 첫 마디 시작선 찾기
+                startX = findBarLine(frame, roiRect, 10);
+                if (startX == -1) startX = 0;
+                
+                // 첫 프레임은 전체 ROI 저장
+                Path p = saveRoi(frame, new Rect(roiRect.x + startX, roiRect.y, roiRect.width - startX, roiRect.height), outDir, saved.size());
                 saved.add(p);
-                measuresCaptured += 2; 
+                
+                int count = countMeasuresInArea(frame, new Rect(roiRect.x + startX, roiRect.y, roiRect.width - startX, roiRect.height));
+                measuresCaptured += count;
+
                 log(logger, "FRAME_SAVED:%s", p.toAbsolutePath());
 
                 lastSavedClean  = cleanFrame.clone();
                 prevSampleClean = cleanFrame.clone();
                 cleanFrame.release();
+                roiMat.release();
                 log(logger, "[첫 프레임] 저장 완료");
                 frameIdx++;
                 continue;
@@ -165,27 +186,33 @@ public class FrameExtractor {
                         // 재생바를 무시하고 실제 악보 선들을 대조하여 겹침 지점 탐색
                         int visualX = findVisualOverlap(lastSavedClean, cleanFrame);
                         
-                        // 화면 전환이 어느 정도 일어났을 때 캡처 (임계값 완화)
+                        // 이전 캡처 지점이 화면의 절반 가까이 이동했을 때만 캡처 (너무 잦은 캡처 방지)
                         if (visualX != -1 && visualX < roiRect.width * 0.5) {
                             int cropX = visualX;
-
                             int captureWidth = roiRect.width - cropX;
+                            
+                            // 캡처할 내용이 유의미한 크기일 때
+                            if (captureWidth > 100) {
                             Rect captureRect = new Rect(roiRect.x + cropX, roiRect.y, captureWidth, roiRect.height);
                             
                             Path p = saveRoi(frame, captureRect, outDir, saved.size());
                             saved.add(p);
-                            measuresCaptured += 2;
+                            
+                            int count = countMeasuresInArea(frame, captureRect);
+                            measuresCaptured += count;
+
                             log(logger, "FRAME_SAVED:%s", p.toAbsolutePath());
-                            log(logger, "  [2마디 추출] %s (누적: %d/%d)", p.getFileName(), measuresCaptured, totalMeasures);
+                            log(logger, "  [%d마디 추가] %s (누적: %d/%d)", count, p.getFileName(), measuresCaptured, totalMeasures);
 
                             if (lastSavedClean != null) lastSavedClean.release();
                             lastSavedClean = cleanFrame.clone();
                             
-                            stableCount = 0; // 실제 저장 시에만 초기화
+                            stableCount = 0; 
                             if (totalMeasures > 0 && measuresCaptured >= totalMeasures) {
-                                log(logger, "[목표 도달] 설정한 마디 수(%d)를 모두 추출했습니다.", totalMeasures);
+                                    log(logger, "[목표 도달] %d마디 추출 완료.", measuresCaptured);
                                 break; 
                             }
+                        }
                         }
                     }
                 } else {
@@ -195,6 +222,7 @@ public class FrameExtractor {
             }
 
             if (prevSampleClean != null) prevSampleClean.release();
+            roiMat.release();
             prevSampleClean = cleanFrame.clone(); // 얕은 복사로 인한 오류 방지
             cleanFrame.release();
 
@@ -212,13 +240,14 @@ public class FrameExtractor {
         if (lastSavedClean != null && !frame.empty()) {
             Mat roiMat = new Mat(frame, roiRect);
             int visualX = findVisualOverlap(lastSavedClean, preprocess(roiMat));
-            roiMat.release();
             int startX = (visualX != -1) ? visualX : 0;
             if (roiRect.width - startX > 50) {
                 Rect lastRect = new Rect(roiRect.x + startX, roiRect.y, roiRect.width - startX, roiRect.height);
                 Path p = saveRoi(frame, lastRect, outDir, saved.size());
                 saved.add(p);
+                measuresCaptured += countMeasuresInArea(frame, lastRect);
             }
+            roiMat.release();
         }
 
         // 정리
@@ -228,7 +257,34 @@ public class FrameExtractor {
         cap.release();
 
         log(logger, "[완료] 총 %d장 캡처됨", saved.size());
-        return saved;
+        return new ExtractionResult(saved, measuresCaptured);
+    }
+
+    /**
+     * 영역 내의 세로선(Bar line) 개수를 세어 마디 수를 반환합니다.
+     */
+    private int countMeasuresInArea(Mat frame, Rect area) {
+        try {
+            Mat roi = new Mat(frame, area);
+            Mat gray = new Mat();
+            Imgproc.cvtColor(roi, gray, Imgproc.COLOR_BGR2GRAY);
+            Imgproc.threshold(gray, gray, 0, 255, Imgproc.THRESH_BINARY_INV | Imgproc.THRESH_OTSU);
+
+            // 세로선 탐지 (검은 픽셀이 수직으로 80% 이상인 열)
+            int barCount = 0;
+            for (int x = 2; x < gray.cols() - 2; x++) {
+                int blackPixels = 0;
+                for (int y = 0; y < gray.rows(); y++) {
+                    if (gray.get(y, x)[0] > 0) blackPixels++;
+                }
+                if ((double) blackPixels / gray.rows() > 0.8) {
+                    barCount++;
+                    x += 15; // 마디 선 두께 및 인접 노이즈 건너뛰기
+                }
+            }
+            gray.release(); roi.release();
+            return Math.max(1, barCount); // 선이 하나라도 있으면 최소 1마디 이상
+        } catch (Exception e) { return 2; } // 실패 시 기본값
     }
 
     // ── 유틸 ─────────────────────────────────────────────────────────────────
@@ -302,10 +358,12 @@ public class FrameExtractor {
         Mat gray = new Mat();
         Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
 
-        // 대비 조절 (contrast 가 1.0보다 크면 강조)
-        if (Math.abs(contrast - 1.0) > 0.01) {
-            gray.convertTo(gray, -1, contrast, 0);
+        // 사용자가 설정한 명도 이하는 검정색(0)으로 처리 (0-100 범위를 0-255로 변환)
+        if (minBrightness > 0) {
+            Imgproc.threshold(gray, gray, minBrightness * 2.55, 255, Imgproc.THRESH_TOZERO);
         }
+
+        Imgproc.threshold(gray, gray, 200, 255, Imgproc.THRESH_BINARY);
 
         Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
         Mat opened = new Mat();

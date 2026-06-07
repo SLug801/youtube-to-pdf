@@ -76,12 +76,10 @@ public class MeasureDetector {
 
     private final RoiConfig roi;
     private final int totalMeasures;
-    private final double contrast;
 
-    public MeasureDetector(double threshold, RoiConfig roi, int totalMeasures, double contrast) {
+    public MeasureDetector(double threshold, RoiConfig roi, int totalMeasures) {
         this.roi = roi;
         this.totalMeasures = totalMeasures;
-        this.contrast = contrast;
     }
 
     public List<Path> extract(Path videoPath, Path outDir) throws Exception {
@@ -315,11 +313,7 @@ public class MeasureDetector {
     private Mat preprocess(Mat src) {
         Mat gray = new Mat();
         Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
-
-        // 대비 조절 (contrast 가 1.0보다 크면 강조)
-        if (Math.abs(contrast - 1.0) > 0.01) {
-            gray.convertTo(gray, -1, contrast, 0);
-        }
+        Imgproc.threshold(gray, gray, 200, 255, Imgproc.THRESH_BINARY);
 
         Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
         Mat opened = new Mat();

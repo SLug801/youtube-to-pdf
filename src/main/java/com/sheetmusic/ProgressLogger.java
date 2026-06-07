@@ -4,7 +4,8 @@ package com.sheetmusic;
 public interface ProgressLogger {
     void log(String message);
 
+    /** 기본 콘솔 출력 로거 반환 */
     static ProgressLogger console() {
-        return System.out::println;
+        return message -> System.out.println(message);
     }
 }

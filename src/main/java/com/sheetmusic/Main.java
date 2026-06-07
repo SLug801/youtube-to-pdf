@@ -30,7 +30,6 @@ public class Main {
         List<String> urls = new ArrayList<>();
         double threshold = Config.SIMILARITY_THRESHOLD;
         FrameExtractor.RoiConfig roi = FrameExtractor.RoiConfig.defaultConfig();
-        double contrast = 1.0;
         int totalMeasures = 0;
         String filePath = null;
 
@@ -56,12 +55,6 @@ public class Main {
                     if (i + 1 < args.length) {
                         try { totalMeasures = Integer.parseInt(args[++i]); }
                         catch (NumberFormatException e) { System.err.println("[경고] 마디 수는 숫자여야 합니다."); }
-                    }
-                }
-                case "--contrast", "-c"   -> {
-                    if (i + 1 < args.length) {
-                        try { contrast = Double.parseDouble(args[++i]); }
-                        catch (NumberFormatException e) { System.err.println("[경고] 대비 값은 숫자여야 합니다."); }
                     }
                 }
                 case "--help", "-h"      -> { printHelp(); return; }
@@ -94,7 +87,7 @@ public class Main {
             System.out.printf("%n[%d/%d] %s%n", i + 1, urls.size(), url);
             try {
                 String baseFileName = String.format("sheet_%02d", i + 1);
-                String pdf = VideoProcessor.process(url, baseFileName, threshold, roi, totalMeasures, contrast);
+                String pdf = VideoProcessor.process(url, baseFileName, threshold, roi, totalMeasures);
                 System.out.println("✅ 완료: " + pdf);
                 success++;
             } catch (Exception e) {
