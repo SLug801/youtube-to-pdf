@@ -54,8 +54,10 @@ java -jar target/youtube-to-pdf-1.0.0.jar
 ```
 1. YouTube URL 입력 후 **불러오기**
 2. 미리보기에서 TAB 악보 영역을 드래그로 선택
-3. 저장 파일명 / 위치 지정
-4. **PDF 변환 시작** 클릭
+3. ---수정중---
+4. ---수정중---
+6. 저장 파일명 / 위치 지정
+7. **PDF 변환 시작** 클릭
 
 ### CLI 모드
 
@@ -63,8 +65,6 @@ java -jar target/youtube-to-pdf-1.0.0.jar
 # 영상 1개
 java -jar target/youtube-to-pdf-1.0.0.jar "https://youtu.be/XXXXX"
 
-# 여러 개 한번에
-java -jar target/youtube-to-pdf-1.0.0.jar "https://youtu.be/AAA" "https://youtu.be/BBB"
 
 # URL 목록 파일로 일괄 처리
 java -jar target/youtube-to-pdf-1.0.0.jar --file urls.txt
@@ -79,7 +79,7 @@ java -jar target/youtube-to-pdf-1.0.0.jar --roi 0.65,1.00,0.00,1.00 "https://you
 
 ## ⚙️ ROI 설정 가이드
 
-zzero gu 님 영상처럼 **연주 영상 하단에 TAB이 나오는 구조**라면 악보 영역만 비교해야 정확해요.
+**연주 영상 하단에 TAB이 나오는 구조**라면 악보 영역만 비교해야 정확합니다.
 
 ```
 ┌─────────────────────────┐  ← 영상 전체
@@ -87,7 +87,7 @@ zzero gu 님 영상처럼 **연주 영상 하단에 TAB이 나오는 구조**라
 │    연주자 영상           │  ← 비교 제외 영역
 │                         │
 ├─────────────────────────┤  ← top 비율 (예: 0.70)
-│  ♩ TAB 악보 영역 ♩      │  ← 이 부분만 비교
+│  ♩ TAB 악보 영역 ♩     │  ← 이 부분만 비교
 └─────────────────────────┘  ← bottom 비율 (1.00)
 ```
 
@@ -101,7 +101,7 @@ zzero gu 님 영상처럼 **연주 영상 하단에 TAB이 나오는 구조**라
 
 ## 🛠️ 기술 스택
 
-- **Java 17**
+- **Java 21**
 - **OpenCV** — 프레임 추출 및 유사도 비교
 - **Apache PDFBox** — PDF 생성
 - **yt-dlp** — YouTube 영상 다운로드
@@ -112,16 +112,7 @@ zzero gu 님 영상처럼 **연주 영상 하단에 TAB이 나오는 구조**라
 ## 📁 프로젝트 구조
 
 ```
-yorutab/
-├── src/main/java/com/sheetmusic/
-│   ├── Main.java              # 진입점, CLI 파싱
-│   ├── Config.java            # 설정 상수
-│   ├── VideoProcessor.java    # 전체 프로세스 조율
-│   ├── YtDlpDownloader.java   # 영상 다운로드
-│   ├── FrameExtractor.java    # ROI 기반 프레임 추출
-│   └── PdfBuilder.java        # PDF 생성
-├── pom.xml
-└── README.md
+수정중
 ```
 
 <br>
