@@ -3,6 +3,7 @@ package com.sheetmusic;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -12,16 +13,16 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
-import java.awt.image.RescaleOp;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
@@ -32,7 +33,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSlider;
+import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -40,16 +41,11 @@ import javax.swing.SwingWorker;
 import javax.swing.border.TitledBorder;
 import javax.swing.text.DefaultCaret;
 
-import org.opencv.core.CvType;
-import org.opencv.core.Mat;
-import org.opencv.imgproc.Imgproc;
-
 public class GuiApp {
 
     private JFrame frame;
     private JTextField urlField;
     private JTextField filenameField;
-    private JTextField measureField;
     private JTextField folderField;
     private JButton previewButton;
     private JButton convertButton;
@@ -58,13 +54,15 @@ public class GuiApp {
     private JLabel roiLabel;
     private JLabel statusLabel;
     private PreviewPanel previewPanel;
+    private CropPreviewPanel cropPreviewPanel;
     private JTextArea logArea;
-    private BufferedImage originalPreviewImage;
-    private JSlider brightnessSlider;
-    private JLabel brightnessValLabel;
-    private boolean isColorInverted = false;
     private FrameExtractor.RoiConfig currentRoi = FrameExtractor.RoiConfig.defaultConfig();
     private SwingWorker<?, ?> currentWorker = null;
+
+    // 프리뷰에서 받은 영상 캐시 — 같은 URL 변환 시 재다운로드 방지
+    private Path   cachedVideo  = null;
+    private Path   cachedFolder = null;
+    private String cachedUrl    = null;
 
     public static void show() {
         SwingUtilities.invokeLater(() -> new GuiApp().createAndShowGui());
@@ -76,13 +74,29 @@ public class GuiApp {
         frame.setLayout(new BorderLayout(10, 10));
 
         frame.add(createControlPanel(), BorderLayout.WEST);
-        frame.add(createPreviewPanel(), BorderLayout.CENTER);
-        frame.add(createLogPanel(), BorderLayout.SOUTH);
+        frame.add(createMainPanel(),    BorderLayout.CENTER);
+        frame.add(createLogPanel(),     BorderLayout.SOUTH);
 
-        frame.setSize(1100, 760);
+        frame.setSize(1200, 820);
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
+
+        // 종료 시 캐시 임시 폴더 정리
+        Runtime.getRuntime().addShutdownHook(new Thread(this::clearCache));
     }
+
+    /** 보관 중인 프리뷰 영상 캐시를 삭제하고 상태를 초기화한다. */
+    private void clearCache() {
+        if (cachedFolder != null) {
+            try (Stream<Path> stream = Files.walk(cachedFolder)) {
+                stream.sorted(java.util.Comparator.reverseOrder())
+                      .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
+            } catch (IOException ignored) {}
+        }
+        cachedVideo = null; cachedFolder = null; cachedUrl = null;
+    }
+
+    // ── 컨트롤 패널 ───────────────────────────────────────────────────────────
 
     private JPanel createControlPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
@@ -90,7 +104,7 @@ public class GuiApp {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(6, 6, 6, 6);
         gbc.anchor = GridBagConstraints.WEST;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.fill   = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
         int row = 0;
@@ -118,43 +132,6 @@ public class GuiApp {
         panel.add(buttonRow, gbc);
 
         gbc.gridy = row++;
-        panel.add(new JLabel("타브 악보 색상 선택 (배경 반전):"), gbc);
-        JPanel colorBtnRow = new JPanel(new GridLayout(1, 2, 8, 0));
-        JButton whiteBtn = new JButton("흰색 배경 (기본)");
-        JButton blackBtn = new JButton("검정 배경 (반전)");
-        whiteBtn.addActionListener(e -> setInversion(false));
-        blackBtn.addActionListener(e -> setInversion(true));
-        colorBtnRow.add(whiteBtn);
-        colorBtnRow.add(blackBtn);
-        gbc.gridy = row++;
-        panel.add(colorBtnRow, gbc);
-
-        gbc.gridy = row++;
-        panel.add(new JLabel("무시할 명도값 (기준 이하 검정색):"), gbc);
-        
-        JPanel sliderPanel = new JPanel(new BorderLayout());
-        brightnessSlider = new JSlider(0, 100, 0);
-        brightnessSlider.setMajorTickSpacing(20);
-        brightnessSlider.setMinorTickSpacing(5);
-        brightnessSlider.setPaintTicks(true);
-        brightnessValLabel = new JLabel("0");
-        brightnessSlider.addChangeListener(e -> {
-            brightnessValLabel.setText(String.valueOf(brightnessSlider.getValue()));
-            applyColorMode(); // 슬라이더 조절 시 프리뷰 즉시 반영
-        });
-        sliderPanel.add(brightnessSlider, BorderLayout.CENTER);
-        sliderPanel.add(brightnessValLabel, BorderLayout.EAST);
-        gbc.gridy = row++;
-        panel.add(sliderPanel, gbc);
-
-        gbc.gridy = row++;
-        panel.add(new JLabel("전체 마디 수 (정확한 종료를 위해 입력):"), gbc);
-
-        measureField = new JTextField("64");
-        gbc.gridy = row++;
-        panel.add(measureField, gbc);
-
-        gbc.gridy = row++;
         panel.add(new JLabel("변환할 파일명:"), gbc);
 
         filenameField = new JTextField("sheetmusic");
@@ -177,7 +154,7 @@ public class GuiApp {
         gbc.gridy = row++;
         panel.add(roiLabel, gbc);
 
-        JLabel hintLabel = new JLabel("미리보기에서 드래그로 인식할 영역을 선택하세요.");
+        JLabel hintLabel = new JLabel("<html>박스 모서리·가장자리를 드래그해<br>인식 영역을 조정하세요.</html>");
         hintLabel.setForeground(Color.DARK_GRAY);
         gbc.gridy = row++;
         panel.add(hintLabel, gbc);
@@ -190,11 +167,23 @@ public class GuiApp {
         return panel;
     }
 
-    private JScrollPane createPreviewPanel() {
+    // ── 메인 패널 (프리뷰 + 캡처 결과) ─────────────────────────────────────
+
+    private JSplitPane createMainPanel() {
         previewPanel = new PreviewPanel(this::onSelectionChanged);
-        previewPanel.setPreferredSize(new Dimension(760, 520));
-        previewPanel.setBorder(new TitledBorder("미리보기 (드래그로 영역 선택)"));
-        return new JScrollPane(previewPanel);
+        previewPanel.setPreferredSize(new Dimension(760, 420));
+        previewPanel.setBorder(new TitledBorder("미리보기 — 박스로 인식 영역 조정"));
+
+        cropPreviewPanel = new CropPreviewPanel();
+        cropPreviewPanel.setPreferredSize(new Dimension(760, 200));
+        cropPreviewPanel.setBorder(new TitledBorder("캡처 영역 미리보기"));
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+            new JScrollPane(previewPanel),
+            cropPreviewPanel);
+        split.setResizeWeight(0.68);
+        split.setDividerSize(6);
+        return split;
     }
 
     private JScrollPane createLogPanel() {
@@ -207,18 +196,18 @@ public class GuiApp {
 
         JScrollPane scroll = new JScrollPane(logArea);
         scroll.setBorder(new TitledBorder("변환 로그"));
-        scroll.setPreferredSize(new Dimension(0, 180));
+        scroll.setPreferredSize(new Dimension(0, 160));
         return scroll;
     }
+
+    // ── 액션 ─────────────────────────────────────────────────────────────────
 
     private void chooseFolder() {
         JFileChooser chooser = new JFileChooser(folderField.getText());
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setDialogTitle("저장 위치 선택");
-        int selected = chooser.showOpenDialog(frame);
-        if (selected == JFileChooser.APPROVE_OPTION) {
+        if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION)
             folderField.setText(chooser.getSelectedFile().getAbsolutePath());
-        }
     }
 
     private void loadPreview() {
@@ -231,8 +220,12 @@ public class GuiApp {
         setBusy(true);
         appendLog("프리뷰 로딩 중... 잠시만 기다려주세요.");
         previewPanel.clearImage();
+        cropPreviewPanel.clearImage();
         currentRoi = FrameExtractor.RoiConfig.defaultConfig();
         roiLabel.setText("ROI: 하단 30% 전체 영역 (기본값)");
+
+        // 새 프리뷰 시작 → 이전 캐시 정리
+        clearCache();
 
         new SwingWorker<BufferedImage, String>() {
             private Path tempFolder;
@@ -241,42 +234,42 @@ public class GuiApp {
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 tempFolder = Files.createTempDirectory("ytpdf-preview-");
-                tempVideo = YtDlpDownloader.download(url, tempFolder, message -> publish(message));
+                tempVideo  = YtDlpDownloader.download(url, tempFolder, this::publish);
                 publish("중간 프레임 추출 중...");
                 return FrameExtractor.captureFrame(tempVideo, 0.5, currentRoi);
             }
 
             @Override
             protected void process(java.util.List<String> chunks) {
-                for (String line : chunks) {
-                    appendLog(line);
-                }
+                for (String line : chunks) appendLog(line);
             }
 
             @Override
             protected void done() {
+                boolean ok = false;
                 try {
-                    BufferedImage image = get();
-                    originalPreviewImage = image;
-                    applyColorMode();
-                    appendLog("프리뷰 준비 완료했습니다. 관심 있는 영역을 드래그로 선택하세요.");
+                    BufferedImage img = get();
+                    previewPanel.setImage(img, currentRoi);
+                    // Show initial crop
+                    BufferedImage crop = previewPanel.getCropImage();
+                    if (crop != null) cropPreviewPanel.setImage(crop);
+                    appendLog("프리뷰 완료. 박스를 조정해 캡처 영역을 설정하세요.");
                     statusLabel.setText("프리뷰 로드 완료");
+                    ok = true;
                 } catch (Exception e) {
                     appendLog("프리뷰 오류: " + e.getMessage());
                     statusLabel.setText("프리뷰 오류");
                 } finally {
                     setBusy(false);
-                    if (tempVideo != null) {
-                        try {
-                            Files.deleteIfExists(tempVideo);
-                        } catch (IOException ignored) {
-                        }
-                    }
-                    if (tempFolder != null) {
-                        try {
-                            Files.deleteIfExists(tempFolder);
-                        } catch (IOException ignored) {
-                        }
+                    if (ok && tempVideo != null) {
+                        // 다운로드 영상 보관 → 변환 시 재사용
+                        cachedVideo  = tempVideo;
+                        cachedFolder = tempFolder;
+                        cachedUrl    = url;
+                    } else {
+                        // 실패 시 임시 파일 정리
+                        try { if (tempVideo  != null) Files.deleteIfExists(tempVideo);  } catch (IOException ignored) {}
+                        try { if (tempFolder != null) Files.deleteIfExists(tempFolder); } catch (IOException ignored) {}
                     }
                 }
             }
@@ -290,26 +283,13 @@ public class GuiApp {
             return;
         }
 
-        int totalMeasures = 0;
-        try {
-            totalMeasures = Integer.parseInt(measureField.getText().trim());
-        } catch (NumberFormatException e) {
-            JOptionPane.showMessageDialog(frame, "마디 수는 숫자로 입력해주세요.", "입력 오류", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
         final String filename = filenameField.getText().trim();
         if (filename.isEmpty()) {
             JOptionPane.showMessageDialog(frame, "파일명을 입력해주세요.", "입력 필요", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        String finalFilename = filename;
-        if (!finalFilename.toLowerCase().endsWith(".pdf")) {
-            finalFilename += ".pdf";
-        }
-        final String pdfFilename = finalFilename;
-
+        String finalFilename = filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf";
         Path targetFolder = Paths.get(folderField.getText().trim());
         try {
             Files.createDirectories(targetFolder);
@@ -318,30 +298,30 @@ public class GuiApp {
             return;
         }
 
-        final Path outputPdf = targetFolder.resolve(pdfFilename);
+        final Path outputPdf = targetFolder.resolve(finalFilename);
 
         setBusy(true);
         cancelButton.setEnabled(true);
-        appendLog("변환 시작... 최종 PDF를 생성합니다.");
+        appendLog("변환 시작...");
         statusLabel.setText("변환 중...");
 
-        final int finalMeasures = totalMeasures;
+        // 같은 URL이면 프리뷰에서 받은 영상 재사용
+        final Path reuseVideo =
+            (cachedVideo != null && url.equals(cachedUrl) && Files.exists(cachedVideo))
+                ? cachedVideo : null;
+
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
-                int minBrightness = brightnessSlider.getValue();
-                return VideoProcessor.process(url, pdfFilename.replaceAll("\\.pdf$", ""), outputPdf, Config.SIMILARITY_THRESHOLD, currentRoi, message -> publish(message), this, finalMeasures, minBrightness);
+                return VideoProcessor.process(url, finalFilename.replaceAll("\\.pdf$", ""),
+                    outputPdf, currentRoi, this::publish, this, reuseVideo);
             }
 
             @Override
             protected void process(java.util.List<String> chunks) {
                 for (String line : chunks) {
-                    if (line.startsWith("FRAME_SAVED:")) {
-                        String pathStr = line.substring(12);
-                        updateCapturedPreview(pathStr);
-                    } else {
-                        appendLog(line);
-                    }
+                    if (line.startsWith("FRAME_SAVED:")) updateCapturedPreview(line.substring(12));
+                    else appendLog(line);
                 }
             }
 
@@ -349,8 +329,7 @@ public class GuiApp {
             protected void done() {
                 try {
                     if (!isCancelled()) {
-                        String pdf = get();
-                        appendLog("변환 완료: " + pdf);
+                        appendLog("변환 완료: " + get());
                         statusLabel.setText("완료");
                     } else {
                         appendLog("변환이 취소되었습니다.");
@@ -373,10 +352,9 @@ public class GuiApp {
         SwingUtilities.invokeLater(() -> {
             try {
                 BufferedImage img = ImageIO.read(Paths.get(pathStr).toFile());
-                previewPanel.setImage(img);
+                cropPreviewPanel.setImage(img);
                 statusLabel.setText("실시간 캡처 중: " + Paths.get(pathStr).getFileName());
-            } catch (IOException ignored) {
-            }
+            } catch (IOException ignored) {}
         });
     }
 
@@ -403,190 +381,217 @@ public class GuiApp {
         });
     }
 
-    private void setInversion(boolean invert) {
-        this.isColorInverted = invert;
-        if (originalPreviewImage != null) {
-            applyColorMode();
-        }
-        appendLog("배경 모드 변경: " + (invert ? "어두운 배경(반전)" : "밝은 배경(원본)"));
-    }
-
-    private void applyColorMode() {
-        if (originalPreviewImage == null) return;
-        
-        // 1. 원본 이미지 복제
-        BufferedImage processed = new BufferedImage(originalPreviewImage.getWidth(), originalPreviewImage.getHeight(), originalPreviewImage.getType());
-        Graphics g = processed.getGraphics();
-        g.drawImage(originalPreviewImage, 0, 0, null);
-        g.dispose();
-
-        // 2. 명도 임계값 처리 (OpenCV 사용)
-        int thresholdValue = brightnessSlider.getValue();
-        if (thresholdValue > 0) {
-            Mat mat = bufferedImageToMat(processed);
-            Mat gray = new Mat();
-            Imgproc.cvtColor(mat, gray, Imgproc.COLOR_BGR2GRAY);
-            
-            // 설정값 이하 명도 무시 (검정색으로)
-            Imgproc.threshold(gray, gray, thresholdValue * 2.55, 255, Imgproc.THRESH_TOZERO);
-            
-            // 결과를 다시 BGR로 변환하여 덮어쓰기
-            Imgproc.cvtColor(gray, mat, Imgproc.COLOR_GRAY2BGR);
-            processed = matToBufferedImage(mat);
-            mat.release(); gray.release();
-        }
-
-        // 3. 색상 반전 처리
-        if (isColorInverted) {
-            processed = invertImage(processed);
-        }
-        previewPanel.setImage(processed, false);
-    }
-
-    private BufferedImage invertImage(BufferedImage src) {
-        // 색상 반전을 위한 연산 (Scale -1.0, Offset 255)
-        RescaleOp op = new RescaleOp(-1.0f, 255f, null);
-        return op.filter(src, null);
-    }
-
-    private Mat bufferedImageToMat(BufferedImage bi) {
-        Mat mat = new Mat(bi.getHeight(), bi.getWidth(), CvType.CV_8UC3);
-        byte[] data = ((java.awt.image.DataBufferByte) bi.getRaster().getDataBuffer()).getData();
-        mat.put(0, 0, data);
-        return mat;
-    }
-
-    private BufferedImage matToBufferedImage(Mat mat) {
-        int type = BufferedImage.TYPE_BYTE_GRAY;
-        if (mat.channels() > 1) {
-            type = BufferedImage.TYPE_3BYTE_BGR;
-        }
-        int bufferSize = mat.channels() * mat.cols() * mat.rows();
-        byte[] b = new byte[bufferSize];
-        mat.get(0, 0, b);
-        BufferedImage image = new BufferedImage(mat.cols(), mat.rows(), type);
-        final byte[] targetPixels = ((java.awt.image.DataBufferByte) image.getRaster().getDataBuffer()).getData();
-        System.arraycopy(b, 0, targetPixels, 0, b.length);
-        return image;
-    }
-
     private void onSelectionChanged(FrameExtractor.RoiConfig roi) {
         currentRoi = roi;
         roiLabel.setText("ROI: " + roi);
-        appendLog("선택 영역 적용: " + roi);
+        BufferedImage crop = previewPanel.getCropImage();
+        if (crop != null) cropPreviewPanel.setImage(crop);
     }
 
-    private static class PreviewPanel extends JPanel {
+    // ── 캡처 결과 미리보기 패널 ────────────────────────────────────────────────
+
+    private static class CropPreviewPanel extends JPanel {
         private BufferedImage image;
-        private Rectangle selection;
-        private double scale = 1.0;
-        // 미리보기에서만 적용할 스케일 보정 (원본에 딱 맞지 않도록 약간 축소)
-        private static final double PREVIEW_SCALE_FACTOR = 0.9;
-        private int imageX;
-        private int imageY;
-        private final Consumer<FrameExtractor.RoiConfig> selectionCallback;
-        private Point startPoint;
 
-        public PreviewPanel(Consumer<FrameExtractor.RoiConfig> selectionCallback) {
-            this.selectionCallback = selectionCallback;
-            setBackground(Color.BLACK);
-            MouseAdapter mouse = new MouseAdapter() {
-                @Override
-                public void mousePressed(MouseEvent e) {
-                    if (image == null) {
-                        return;
-                    }
-                    Point p = toImagePoint(e.getPoint());
-                    if (p == null) {
-                        return;
-                    }
-                    startPoint = p;
-                    selection = new Rectangle(p);
-                    repaint();
-                }
-
-                @Override
-                public void mouseDragged(MouseEvent e) {
-                    if (startPoint == null || image == null) {
-                        return;
-                    }
-                    Point p = toImagePoint(e.getPoint());
-                    if (p == null) {
-                        return;
-                    }
-                    selection = createSelection(startPoint, p);
-                    repaint();
-                }
-
-                @Override
-                public void mouseReleased(MouseEvent e) {
-                    if (startPoint == null || image == null) {
-                        return;
-                    }
-                    Point p = toImagePoint(e.getPoint());
-                    if (p != null) {
-                        selection = createSelection(startPoint, p);
-                        repaint();
-                        applySelection();
-                    }
-                    startPoint = null;
-                }
-            };
-            addMouseListener(mouse);
-            addMouseMotionListener(mouse);
+        CropPreviewPanel() {
+            setBackground(new Color(30, 30, 30));
         }
 
-        public void setImage(BufferedImage image) {
-            setImage(image, true);
-        }
-
-        public void setImage(BufferedImage image, boolean resetSelection) {
-            this.image = image;
-            if (resetSelection) this.selection = null;
+        void setImage(BufferedImage img) {
+            this.image = img;
             repaint();
         }
 
-        public void clearImage() {
+        void clearImage() {
             this.image = null;
-            this.selection = null;
             repaint();
         }
 
-        private void applySelection() {
-            if (selection == null || selection.width < 10 || selection.height < 10) {
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            if (image == null) {
+                g.setColor(Color.GRAY);
+                g.drawString("인식 박스를 조정하면 캡처될 영역이 여기에 표시됩니다.", 20, 30);
                 return;
             }
-            double left = selection.x / (double) image.getWidth();
-            double top = selection.y / (double) image.getHeight();
-            double right = (selection.x + selection.width) / (double) image.getWidth();
-            double bottom = (selection.y + selection.height) / (double) image.getHeight();
-            selectionCallback.accept(new FrameExtractor.RoiConfig(top, bottom, left, right));
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            double scale = Math.min(
+                (double) getWidth()  / image.getWidth(),
+                (double) getHeight() / image.getHeight());
+            int w = (int)(image.getWidth()  * scale);
+            int h = (int)(image.getHeight() * scale);
+            int x = (getWidth()  - w) / 2;
+            int y = (getHeight() - h) / 2;
+            g2.drawImage(image, x, y, w, h, null);
+        }
+    }
+
+    // ── 메인 프리뷰 패널 (조절 가능한 ROI 박스) ──────────────────────────────
+
+    private static class PreviewPanel extends JPanel {
+
+        private BufferedImage image;
+        private Rectangle roiBox;           // image 좌표계
+
+        private double scale  = 1.0;
+        private int    imageX = 0;
+        private int    imageY = 0;
+
+        private static final double PREVIEW_SCALE = 0.92;
+        private static final int    HANDLE_SIZE   = 10;  // screen px
+        private static final int    MIN_BOX       = 20;  // image px
+
+        // Handle order: 0=NW 1=N 2=NE 3=W 4=E 5=SW 6=S 7=SE
+        private static final Cursor[] CURSORS = {
+            Cursor.getPredefinedCursor(Cursor.NW_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.NE_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.W_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.SW_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.S_RESIZE_CURSOR),
+            Cursor.getPredefinedCursor(Cursor.SE_RESIZE_CURSOR),
+        };
+
+        private int       activeHandle  = -1;   // -1=none 0-7=handle 8=move
+        private Point     dragStart;
+        private Rectangle boxAtDragStart;
+
+        private final Consumer<FrameExtractor.RoiConfig> selectionCallback;
+
+        PreviewPanel(Consumer<FrameExtractor.RoiConfig> selectionCallback) {
+            this.selectionCallback = selectionCallback;
+            setBackground(Color.BLACK);
+
+            MouseAdapter ma = new MouseAdapter() {
+                @Override public void mousePressed(MouseEvent e) {
+                    if (image == null || roiBox == null) return;
+                    activeHandle = hitTest(e.getPoint());
+                    if (activeHandle >= 0) {
+                        dragStart     = e.getPoint();
+                        boxAtDragStart = new Rectangle(roiBox);
+                    }
+                }
+                @Override public void mouseDragged(MouseEvent e) {
+                    if (activeHandle < 0 || dragStart == null) return;
+                    int dx = (int)((e.getX() - dragStart.x) / scale);
+                    int dy = (int)((e.getY() - dragStart.y) / scale);
+                    applyDrag(dx, dy);
+                    fireSelection();
+                    repaint();
+                }
+                @Override public void mouseReleased(MouseEvent e) {
+                    activeHandle = -1; dragStart = null; boxAtDragStart = null;
+                }
+                @Override public void mouseMoved(MouseEvent e) {
+                    if (image == null || roiBox == null) { setCursor(Cursor.getDefaultCursor()); return; }
+                    int h = hitTest(e.getPoint());
+                    if      (h >= 0 && h < 8) setCursor(CURSORS[h]);
+                    else if (h == 8)           setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                    else                       setCursor(Cursor.getDefaultCursor());
+                }
+            };
+            addMouseListener(ma);
+            addMouseMotionListener(ma);
         }
 
-        private Rectangle createSelection(Point a, Point b) {
-            int x = Math.min(a.x, b.x);
-            int y = Math.min(a.y, b.y);
-            int w = Math.max(1, Math.abs(a.x - b.x));
-            int h = Math.max(1, Math.abs(a.y - b.y));
-            return new Rectangle(x, y, w, h);
+        // ── public API ───────────────────────────────────────────────────────
+
+        void setImage(BufferedImage img, FrameExtractor.RoiConfig roi) {
+            this.image = img;
+            if (img != null) initBox(roi, img.getWidth(), img.getHeight());
+            repaint();
         }
 
-        private Point toImagePoint(Point screenPoint) {
-            if (image == null) {
-                return null;
-            }
-            int x = screenPoint.x - imageX;
-            int y = screenPoint.y - imageY;
-            if (x < 0 || y < 0) {
-                return null;
-            }
-            int ix = (int) Math.round(x / scale);
-            int iy = (int) Math.round(y / scale);
-            if (ix < 0 || iy < 0 || ix > image.getWidth() || iy > image.getHeight()) {
-                return null;
-            }
-            return new Point(ix, iy);
+        void clearImage() { image = null; roiBox = null; repaint(); }
+
+        BufferedImage getCropImage() {
+            if (image == null || roiBox == null) return null;
+            int x = clamp(roiBox.x, 0, image.getWidth()  - 1);
+            int y = clamp(roiBox.y, 0, image.getHeight() - 1);
+            int w = clamp(roiBox.width,  1, image.getWidth()  - x);
+            int h = clamp(roiBox.height, 1, image.getHeight() - y);
+            return image.getSubimage(x, y, w, h);
         }
+
+        // ── internal ─────────────────────────────────────────────────────────
+
+        private void initBox(FrameExtractor.RoiConfig roi, int iw, int ih) {
+            int x = (int)(roi.leftRatio()   * iw);
+            int y = (int)(roi.topRatio()    * ih);
+            int w = (int)((roi.rightRatio()  - roi.leftRatio())   * iw);
+            int h = (int)((roi.bottomRatio() - roi.topRatio())    * ih);
+            roiBox = new Rectangle(x, y, Math.max(MIN_BOX, w), Math.max(MIN_BOX, h));
+        }
+
+        // Returns screen coordinates of the 8 handles
+        private int[] handleSX() {
+            int bx = imageX + (int)(roiBox.x * scale);
+            int bw = (int)(roiBox.width * scale);
+            return new int[]{ bx, bx+bw/2, bx+bw, bx, bx+bw, bx, bx+bw/2, bx+bw };
+        }
+        private int[] handleSY() {
+            int by = imageY + (int)(roiBox.y * scale);
+            int bh = (int)(roiBox.height * scale);
+            return new int[]{ by, by, by, by+bh/2, by+bh/2, by+bh, by+bh, by+bh };
+        }
+
+        private int hitTest(Point p) {
+            if (roiBox == null) return -1;
+            int hs = HANDLE_SIZE;
+            int[] hx = handleSX(), hy = handleSY();
+            for (int i = 0; i < 8; i++) {
+                if (p.x >= hx[i]-hs/2 && p.x <= hx[i]+hs/2 &&
+                    p.y >= hy[i]-hs/2 && p.y <= hy[i]+hs/2) return i;
+            }
+            int bx = imageX + (int)(roiBox.x * scale);
+            int by = imageY + (int)(roiBox.y * scale);
+            int bw = (int)(roiBox.width * scale);
+            int bh = (int)(roiBox.height * scale);
+            if (p.x >= bx && p.x <= bx+bw && p.y >= by && p.y <= by+bh) return 8;
+            return -1;
+        }
+
+        private void applyDrag(int dx, int dy) {
+            int x = boxAtDragStart.x, y = boxAtDragStart.y;
+            int r = x + boxAtDragStart.width, b = y + boxAtDragStart.height;
+            switch (activeHandle) {
+                case 0 -> { x += dx; y += dy; }
+                case 1 -> { y += dy; }
+                case 2 -> { r += dx; y += dy; }
+                case 3 -> { x += dx; }
+                case 4 -> { r += dx; }
+                case 5 -> { x += dx; b += dy; }
+                case 6 -> { b += dy; }
+                case 7 -> { r += dx; b += dy; }
+                case 8 -> { x += dx; r += dx; y += dy; b += dy; }
+            }
+            // Enforce minimum size
+            if (r - x < MIN_BOX) { if (activeHandle==0||activeHandle==3||activeHandle==5) x = r-MIN_BOX; else r = x+MIN_BOX; }
+            if (b - y < MIN_BOX) { if (activeHandle==0||activeHandle==1||activeHandle==2) y = b-MIN_BOX; else b = y+MIN_BOX; }
+            // Clamp to image bounds
+            if (image != null) {
+                int iw = image.getWidth(), ih = image.getHeight();
+                x = clamp(x, 0, iw-MIN_BOX); y = clamp(y, 0, ih-MIN_BOX);
+                r = clamp(r, x+MIN_BOX, iw);  b = clamp(b, y+MIN_BOX, ih);
+            }
+            roiBox = new Rectangle(x, y, r-x, b-y);
+        }
+
+        private void fireSelection() {
+            if (roiBox == null || image == null) return;
+            double iw = image.getWidth(), ih = image.getHeight();
+            selectionCallback.accept(new FrameExtractor.RoiConfig(
+                roiBox.y / ih,
+                (roiBox.y + roiBox.height) / ih,
+                roiBox.x / iw,
+                (roiBox.x + roiBox.width)  / iw));
+        }
+
+        private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
 
         @Override
         protected void paintComponent(Graphics g) {
@@ -596,26 +601,44 @@ public class GuiApp {
                 g.drawString("프리뷰를 불러오면 여기에 이미지가 표시됩니다.", 20, 30);
                 return;
             }
-            int availableWidth = getWidth();
-            int availableHeight = getHeight();
-            double baseScale = Math.min((double) availableWidth / image.getWidth(), (double) availableHeight / image.getHeight());
-            // 프리뷰에서는 원본에 딱 맞추지 않고 약간 작게 표시
-            scale = baseScale * PREVIEW_SCALE_FACTOR;
-            int drawWidth = (int) (image.getWidth() * scale);
-            int drawHeight = (int) (image.getHeight() * scale);
-            imageX = (availableWidth - drawWidth) / 2;
-            imageY = (availableHeight - drawHeight) / 2;
-            g.drawImage(image, imageX, imageY, drawWidth, drawHeight, null);
-            if (selection != null) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setColor(new Color(0, 120, 215, 80));
-                g2.fillRect(imageX + (int) Math.round(selection.x * scale), imageY + (int) Math.round(selection.y * scale),
-                        (int) Math.round(selection.width * scale), (int) Math.round(selection.height * scale));
+
+            double base = Math.min((double)getWidth()/image.getWidth(), (double)getHeight()/image.getHeight());
+            scale  = base * PREVIEW_SCALE;
+            int dw = (int)(image.getWidth()  * scale);
+            int dh = (int)(image.getHeight() * scale);
+            imageX = (getWidth()  - dw) / 2;
+            imageY = (getHeight() - dh) / 2;
+
+            Graphics2D g2 = (Graphics2D) g;
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2.drawImage(image, imageX, imageY, dw, dh, null);
+
+            if (roiBox == null) return;
+
+            int bx = imageX + (int)(roiBox.x * scale);
+            int by = imageY + (int)(roiBox.y * scale);
+            int bw = (int)(roiBox.width  * scale);
+            int bh = (int)(roiBox.height * scale);
+
+            // Semi-transparent fill
+            g2.setColor(new Color(0, 120, 215, 55));
+            g2.fillRect(bx, by, bw, bh);
+
+            // Box border
+            g2.setColor(new Color(0, 150, 255));
+            g2.setStroke(new BasicStroke(2f));
+            g2.drawRect(bx, by, bw, bh);
+
+            // 8 handles
+            int[] hx = handleSX(), hy = handleSY();
+            int hs = HANDLE_SIZE;
+            for (int i = 0; i < 8; i++) {
+                g2.setColor(Color.WHITE);
+                g2.fillRect(hx[i]-hs/2, hy[i]-hs/2, hs, hs);
                 g2.setColor(new Color(0, 120, 215));
-                g2.setStroke(new BasicStroke(2));
-                g2.drawRect(imageX + (int) Math.round(selection.x * scale), imageY + (int) Math.round(selection.y * scale),
-                        (int) Math.round(selection.width * scale), (int) Math.round(selection.height * scale));
-                g2.dispose();
+                g2.setStroke(new BasicStroke(1.5f));
+                g2.drawRect(hx[i]-hs/2, hy[i]-hs/2, hs, hs);
             }
         }
     }
