@@ -90,7 +90,7 @@ public class FrameExtractor {
         this.roi = roi;
         this.totalMeasures = totalMeasures;
         this.contrast = contrast;
-        this.minBrightness = minBrightness;
+                this.minBrightness = minBrightness;
     }
 
     public ExtractionResult extract(Path videoPath, Path outDir) throws Exception {
@@ -101,6 +101,7 @@ public class FrameExtractor {
         Files.createDirectories(outDir);
 
         VideoCapture cap = new VideoCapture(videoPath.toString());
+
         if (!cap.isOpened()) throw new IllegalStateException("영상 열기 실패: " + videoPath);
 
         double fps       = cap.get(Videoio.CAP_PROP_FPS);
@@ -143,7 +144,7 @@ public class FrameExtractor {
                 log(logger, "[첫 프레임] frame=%d", frameIdx);
                 
                 // 첫 마디 시작선 찾기
-                startX = findBarLine(frame, roiRect, 10);
+                int startX = findBarLine(frame, roiRect, 10);
                 if (startX == -1) startX = 0;
                 
                 // 첫 프레임은 전체 ROI 저장
@@ -196,6 +197,7 @@ public class FrameExtractor {
                             Rect captureRect = new Rect(roiRect.x + cropX, roiRect.y, captureWidth, roiRect.height);
                             
                             Path p = saveRoi(frame, captureRect, outDir, saved.size());
+
                             saved.add(p);
                             
                             int count = countMeasuresInArea(frame, captureRect);
