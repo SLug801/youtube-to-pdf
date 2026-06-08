@@ -1,28 +1,6 @@
-# Maven
-/target/
-**/target/
-/.mvn
-.mvn/
-
-# Java
+target/
+sheet_*/
+ocr_debug_*.png
 *.class
-*.jar
-*.war
-*.ear
-
-# IDE
-*.iml
-*.idea/
-.vscode/
-
-# OS
 .DS_Store
 Thumbs.db
-
-# yt-dlp and generated artifacts
-**/captured_frames/
-**/*.mp4
-**/*.mkv
-**/*.webm
-**/video.*
-**/*.pdf
