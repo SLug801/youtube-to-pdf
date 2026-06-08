@@ -57,10 +57,11 @@ public class YtDlpDownloader {
         Path outputTemplate = outputDir.resolve("video.%(ext)s");
         Files.createDirectories(outputDir);
 
+        // bestvideo: 단일 비디오 스트림 (ffmpeg merge 불필요, 1080p H.264 우선)
+        // 22/18: 폴백 (오디오 포함 progressive, 720p/360p)
         ProcessBuilder pb = new ProcessBuilder(
                 "yt-dlp",
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
+                "-f", "bestvideo[vcodec^=avc][height<=1080]/bestvideo[height<=1080]/22/18/best",
                 "-o", outputTemplate.toString(),
                 "--no-playlist",
                 url
