@@ -7,7 +7,6 @@ import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import javax.imageio.ImageIO;
@@ -34,12 +33,17 @@ import org.opencv.imgproc.Imgproc;
  * 영상 형태: 악보는 대부분 정지(재생 커서만 이동)하다가 줄 끝에서 스크롤되는 방식.
  * 따라서 "정지 구간은 무시하고, 실제 스크롤이 감지될 때만" 새 콘텐츠를 이어붙인다.
  *
- * 방식: 앵커 기반 슬릿스캔.
- *  - 매 프레임을 "이미 쌓인 파노라마 꼬리"에 정렬(anchor)해 스크롤량 dx를 구한다.
- *    → 누적 오차가 쌓이지 않고, 한 번 틀려도 다음 프레임이 자동 보정.
- *  - dx≈0(정지)이면 아무것도 붙이지 않는다. 실제 스크롤(dx>0, 신뢰도 충분)일 때만 붙인다.
- *  - 특징은 Sobel-X(수직 에지): 가로 오선과 매끄러운 반투명 배경을 자연히 억제하고
- *    마디선·숫자·기둥 같은 세로 획만 남겨 매칭 신뢰도를 높인다.
+ * 방식: 확정 화면(프런티어) 대비 전폭(全幅) 매칭.
+ *  - "현재까지 확정된 화면(comFeat, ROI 전폭)"에 새 프레임을 정렬해 우측 이동량 dx를 구한다.
+ *    템플릿을 현재 프레임 왼쪽에서 떼어 확정 화면 전체를 탐색하므로, 한 프레임에 화면의
+ *    대부분이 바뀌는 "점프 스크롤"까지 dx를 측정한다(슬릿스캔의 ~17% 폭 한계 제거).
+ *  - dx≈0(정지·재생바만 이동)이면 붙이지 않고, 실제 스크롤이면 새로 드러난 우측 dx만 이어붙여
+ *    중복을 제거한다.
+ *  - 겹침이 거의 없어 매칭이 실패하면 곧바로 버리지 않는다(누락 방지): 직전 샘플과 동일한
+ *    "정지된 새 화면"으로 확인될 때만 화면 전체를 새 페이지로 이어붙인다. 전환/블러 프레임은
+ *    안정될 때까지 보류한다.
+ *  - 특징(featureImage)은 adaptiveThreshold로 표기만 추출 → 움직이는 반투명 배경을 억제하고
+ *    가로 오선·잡티를 제거해 세로 획(마디선·숫자·기둥) 위주로 남겨 매칭 신뢰도를 높인다.
  */
 public class FrameExtractor {
 
@@ -53,12 +57,16 @@ public class FrameExtractor {
 
     // ── 스캔/스티칭 파라미터 ────────────────────────────────────────────────
     private static final int    SCAN_FPS     = 10;      // 초당 검사 프레임
-    private static final double SLIT_RATIO   = 0.85;    // 슬릿 컬럼 위치(ROI 폭 대비)
-    private static final double TPL_RATIO    = 0.35;    // 매칭 템플릿 폭(ROI 폭 대비)
-    private static final double MIN_SCORE    = 0.22;    // 매칭 신뢰도 하한(실제 스크롤 누락 방지)
+    private static final double TPL_RATIO    = 0.12;    // 매칭 템플릿 폭(ROI 폭 대비). 작을수록
+                                                        //   작은 중복·큰 점프 스크롤까지 검출.
+    private static final int    TPL_INSET    = 0;       // 템플릿을 현재 프레임 왼쪽에서 떼는 위치
+    private static final double MIN_SCORE    = 0.35;    // 겹침 신뢰 임계(이상이면 dx 채택)
+    private static final double MARGIN       = 0.12;    // peak−zero 마진(실제 스크롤 vs 정지/주기 오매칭)
+    private static final double SEED_REFRESH_SCORE = 0.80; // 첫 스크롤 전 동일화면 판정(시드 갱신)
+    private static final double NEWPAGE_MAX_SCORE   = 0.30; // 이보다 매칭이 낮아야 "새 페이지" 후보
+    private static final double STABLE_SCORE = 0.75;    // 정지(동일 화면) 판정 임계
     private static final int    MIN_SHIFT    = 3;       // 이보다 작은 dx는 정지로 간주
     private static final double CONTENT_MIN  = 0.004;   // 인트로(빈 화면) 판별 임계
-    private static final double MAX_DX_RATIO = 0.75;    // 프레임당 최대 스크롤(점프 차단)
 
     public record RoiConfig(
             double topRatio, double bottomRatio,
@@ -112,23 +120,22 @@ public class FrameExtractor {
 
             int roiW    = roiRect.width;
             int roiH    = roiRect.height;
-            int slitCol = clamp((int)(roiW * SLIT_RATIO), 2, roiW - 1);
-            int tw      = clamp((int)(roiW * TPL_RATIO), 8, slitCol - 1);
-            int tx      = (roiW - tw) / 2;
-            int maxDx   = (int)(roiW * MAX_DX_RATIO);
+            int tw      = clamp((int)(roiW * TPL_RATIO), 8, roiW - 1);
 
             long stepUs = (long)(1_000_000.0 / SCAN_FPS);
 
-            log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | 모드=앵커슬릿스캔(%dfps)",
+            log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | 모드=전폭매칭(%dfps)",
                 width, height, fps, durationSec, SCAN_FPS);
-            log(logger, "[설정] ROI=%s | 슬릿=%dpx | 템플릿=%dpx@%d", roi, slitCol, tw, tx);
+            log(logger, "[설정] ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
+                roi, tw, MIN_SCORE, STABLE_SCORE);
 
             List<Mat> colorStrips = new ArrayList<>();
-            Mat   featTail     = null;    // 파노라마 꼬리의 특징 이미지(최근 roiW 컬럼)
-            Mat   lastRoiColor = null;    // 마지막 ROI 컬러(꼬리 처리용)
-            int   canvasW      = 0;       // 누적 파노라마 폭
-            boolean started    = false;
-            int   scrollCnt = 0, staticCnt = 0;   // 스크롤 적용 / 정지 무시 횟수
+            Mat   comFeat   = null;       // 파노라마 프런티어에 해당하는 "확정 화면"의 특징(roiW 폭)
+            Mat   lastFeat  = null;       // 직전 샘플 프레임의 특징(정지/새 페이지 판정용)
+            int   canvasW   = 0;          // 누적 파노라마 폭
+            boolean started = false;
+            boolean scrolled = false;     // 첫 스크롤 발생 여부(이전엔 시드 갱신 허용)
+            int   scrollCnt = 0, pageCnt = 0, staticCnt = 0;   // 스크롤 / 새 페이지 / 정지
 
             Java2DFrameConverter converter = new Java2DFrameConverter();
             long currentUs = 0, sampleIdx = 0;
@@ -152,88 +159,84 @@ public class FrameExtractor {
 
                 if (!started) {
                     double cr = (double) Core.countNonZero(feat) / feat.total();
-                    if (cr < CONTENT_MIN) {                 // 인트로 스킵
+                    if (cr < CONTENT_MIN) {                 // 인트로(빈 화면) 스킵
                         feat.release(); roiColor.release();
                         currentUs += stepUs; sampleIdx++;
                         continue;
                     }
-                    // 첫 콘텐츠 프레임: 슬릿 왼쪽 [0..slitCol]을 시드로
-                    colorStrips.add(new Mat(roiColor, new Rect(0, 0, slitCol, roiH)).clone());
-                    featTail     = new Mat(feat, new Rect(0, 0, slitCol, roiH)).clone();
-                    canvasW      = slitCol;
-                    lastRoiColor = roiColor;
-                    started      = true;
-                    feat.release();
-                    log(logger, "[콘텐츠 시작] t=%.1fs (시드 %dpx)", currentUs / 1_000_000.0, slitCol);
+                    // 첫 콘텐츠 프레임: 화면 전체를 시드로
+                    colorStrips.add(roiColor.clone());
+                    comFeat  = feat.clone();
+                    lastFeat = feat.clone();
+                    canvasW  = roiW;
+                    started  = true;
+                    feat.release(); roiColor.release();
+                    log(logger, "[콘텐츠 시작] t=%.1fs (시드 %dpx)", currentUs / 1_000_000.0, roiW);
                     currentUs += stepUs; sampleIdx++;
                     continue;
                 }
 
-                // ── 앵커 매칭: 현재 프레임 중앙 밴드를 파노라마 꼬리에 정렬 ─────
-                int    fw   = featTail.cols();
-                Mat    tpl  = new Mat(feat, new Rect(tx, 0, tw, roiH));
-                Mat    res  = new Mat();
-                Imgproc.matchTemplate(featTail, tpl, res, Imgproc.TM_CCOEFF_NORMED);
-                Core.MinMaxLocResult mmr = Core.minMaxLoc(res);
-                tpl.release(); res.release();
+                // ── 확정 화면(comFeat) 대비 현재 프레임의 우측 이동량 dx 측정 ──
+                double[] m    = matchOffset(comFeat, feat, tw, TPL_INSET);
+                int    dx     = (int) m[0];
+                double score  = m[1];          // 최적 위치(dx) 상관
+                double zero   = m[2];          // dx=0(제로 시프트) 상관
+                double margin = score - zero;  // 스크롤 위치가 정지 위치보다 얼마나 더 잘 맞는가
+                lastDx = dx; lastScore = score;
 
-                double score = mmr.maxVal;
-                int    loc   = (int) mmr.maxLoc.x;
-                // dx 유도: canvasW가 상쇄되어 featTail 기준 상대식만 남음
-                int    dxMeasured = (slitCol - fw) + loc - tx;
+                // 실제 스크롤: dx 위치가 dx=0보다 뚜렷이(MARGIN) 더 잘 맞을 때만 채택.
+                // → 빈/희박한 마디의 미세 스크롤도 잡고(누락 방지), 정지·주기적 오매칭(peak≈zero)은
+                //   거른다(중복 방지). 상관·diff 절대값만으론 둘을 못 가르므로 마진이 핵심.
+                boolean isScroll = dx >= MIN_SHIFT && dx <= roiW - tw
+                                && score >= MIN_SCORE && margin >= MARGIN;
 
-                // 실제 스크롤만 채택: 신뢰도 충분 + dx가 유효 범위.
-                // dx≈0(정지) 또는 불확실 → 아무것도 붙이지 않음(예측 대체 없음).
-                boolean ok = score >= MIN_SCORE
-                          && dxMeasured >= MIN_SHIFT
-                          && dxMeasured <= maxDx;
-
-                int dxUse = ok ? dxMeasured : 0;
-                lastDx = dxUse; lastScore = score;
-
-                if (ok) scrollCnt++; else staticCnt++;
-
-                if (dxUse > 0) {
-                    int appendStart = slitCol - dxUse;       // 슬릿 기준 새 콘텐츠 시작
-                    Rect strip = new Rect(appendStart, 0, dxUse, roiH);
-                    colorStrips.add(new Mat(roiColor, strip).clone());
-
-                    // featTail 갱신: 새 특징을 붙이고 최근 roiW 컬럼만 유지
-                    Mat newFeat = new Mat(feat, strip);
-                    Mat comb = new Mat();
-                    Core.hconcat(Arrays.asList(featTail, newFeat), comb);
-                    featTail.release();
-                    int cw = comb.cols();
-                    if (cw > roiW) {
-                        featTail = new Mat(comb, new Rect(cw - roiW, 0, roiW, roiH)).clone();
-                        comb.release();
+                if (isScroll) {
+                    colorStrips.add(new Mat(roiColor, new Rect(roiW - dx, 0, dx, roiH)).clone());
+                    comFeat.release(); comFeat = feat.clone();
+                    canvasW += dx;
+                    scrollCnt++;
+                    scrolled = true;
+                } else if (!scrolled && zero >= SEED_REFRESH_SCORE) {
+                    // 첫 스크롤 전 동일 화면(인트로) → 또렷한 최신 프레임으로 시드 교체.
+                    // fade-in 등으로 첫 프레임이 흐려 출력이 하얗게 나오는 문제를 방지.
+                    colorStrips.get(0).release();
+                    colorStrips.set(0, roiColor.clone());
+                    comFeat.release(); comFeat = feat.clone();
+                    staticCnt++;
+                } else if (score < NEWPAGE_MAX_SCORE) {
+                    // 확정 화면과 겹침을 못 찾음 → 완전히 새 화면일 수 있음(누락 방지).
+                    // 직전 샘플과 동일한 "정지된 새 화면"으로 확인될 때만 통째로 새 페이지 추가.
+                    double[] s = matchOffset(lastFeat, feat, tw, TPL_INSET);
+                    if (s[2] >= STABLE_SCORE) {     // 직전 샘플과 dx=0에서 일치 = 정지된 새 화면
+                        colorStrips.add(roiColor.clone());
+                        comFeat.release(); comFeat = feat.clone();
+                        canvasW += roiW;
+                        pageCnt++;
+                        scrolled = true;
                     } else {
-                        featTail = comb;
+                        staticCnt++;   // 전환/블러 프레임 → 안정될 때까지 보류
                     }
-                    canvasW += dxUse;
+                } else {
+                    staticCnt++;       // 정지(재생바만 이동) 또는 주기적 오매칭
                 }
 
-                feat.release();
-                lastRoiColor.release(); lastRoiColor = roiColor;
+                lastFeat.release(); lastFeat = feat.clone();
+                feat.release(); roiColor.release();
 
                 if (sampleIdx > 0 && sampleIdx % (SCAN_FPS * 8) == 0) {
                     double pct     = lengthUs > 0 ? (double) currentUs / lengthUs * 100 : -1;
                     long   elapsed = (System.currentTimeMillis() - startMs) / 1000;
-                    log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | 스크롤%d 정지%d",
+                    log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | 스크롤%d 페이지%d 정지%d",
                         Math.max(pct, 0), elapsed, canvasW, lastDx, lastScore,
-                        scrollCnt, staticCnt);
+                        scrollCnt, pageCnt, staticCnt);
                 }
 
                 currentUs += stepUs;
                 sampleIdx++;
             }
 
-            // ── 꼬리: 마지막 프레임의 슬릿 오른쪽 [slitCol..roiW] 추가 ────────
-            if (lastRoiColor != null && slitCol < roiW) {
-                colorStrips.add(new Mat(lastRoiColor, new Rect(slitCol, 0, roiW - slitCol, roiH)).clone());
-            }
-            if (featTail     != null) featTail.release();
-            if (lastRoiColor != null) lastRoiColor.release();
+            if (comFeat  != null) comFeat.release();
+            if (lastFeat != null) lastFeat.release();
 
             if (colorStrips.isEmpty()) {
                 log(logger, "[경고] 콘텐츠를 찾지 못했습니다.");
@@ -243,45 +246,68 @@ public class FrameExtractor {
             Mat panorama = new Mat();
             Core.hconcat(colorStrips, panorama);
             for (Mat s : colorStrips) s.release();
-            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | 스크롤%d 정지%d",
-                panorama.cols(), panorama.rows(), scrollCnt, staticCnt);
+            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | 스크롤%d 페이지%d 정지%d",
+                panorama.cols(), panorama.rows(), scrollCnt, pageCnt, staticCnt);
 
-            List<Path> saved = sliceAndSave(panorama, roiW, outDir, logger);
+            Mat cleaned = cleanForOutput(panorama);   // 반투명/배경 제거 → 흰 종이+검은 표기
             panorama.release();
+            List<Path> saved = sliceAndSave(cleaned, roiW, outDir, logger);
+            cleaned.release();
             log(logger, "[완료] 총 %d줄 생성", saved.size());
             return saved;
         }
     }
 
     /**
+     * 기준 화면(ref) 안에서 현재 프레임(cur)의 왼쪽 밴드를 찾아 우측 이동량 dx와 신뢰도를 반환한다.
+     * 템플릿을 cur의 왼쪽(inset)에서 떼고 ref 전체를 탐색하므로, 화면 폭에 가까운 큰 점프
+     * 스크롤까지 측정 가능하다(슬릿스캔의 폭 한계 없음). 단, 검출 가능한 최소 겹침은 템플릿 폭(tw).
+     *
+     * @return {dx, peakScore, zeroScore}. dx ≥ 0 이면 cur이 ref보다 오른쪽으로 dx만큼 이동(스크롤).
+     *         zeroScore는 dx=0(제로 시프트)에서의 상관 — 높으면 화면이 안 움직인 것(정지).
+     */
+    private double[] matchOffset(Mat ref, Mat cur, int tw, int inset) {
+        int h  = cur.rows();
+        int cw = cur.cols();
+        int tx = clamp(inset, 0, Math.max(0, cw - tw));
+        Mat tpl = new Mat(cur, new Rect(tx, 0, tw, h));
+        Mat res = new Mat();
+        Imgproc.matchTemplate(ref, tpl, res, Imgproc.TM_CCOEFF_NORMED);
+        Core.MinMaxLocResult mmr = Core.minMaxLoc(res);
+        double zero = res.get(0, tx)[0];     // loc=tx ↔ dx=0
+        tpl.release(); res.release();
+        return new double[]{ (int) mmr.maxLoc.x - tx, mmr.maxVal, zero };
+    }
+
+    /**
      * 매칭/콘텐츠 판별용 특징 이미지.
-     * adaptiveThreshold로 TAB 표기(숫자·마디선)를 흰색으로 추출 — 움직이는 반투명 배경의
-     * 밝기 변화에 강하고, 글리프 전체가 남아 스크롤 매칭이 잘 잡힌다(Sobel보다 밀도 높음).
-     * 가로 오선과 잡티는 제거해 세로 특징 위주로 남긴다.
+     * 모폴로지 블랙햇으로 "(반투명) 패널 위 어두운 표기(숫자·마디선·기둥)"만 추출한다.
+     * 블랙햇은 국소 대비 기반이라 전역 밝기/투명도에 무관 — 반투명이 강하거나(흐림),
+     * 패널 없이 투명하거나, 너무 밝은 경우까지 표기를 안정적으로 살린다(adaptiveThreshold보다
+     * 배경 잡음이 훨씬 적음, 실측 검증됨). 가로 오선은 제거해 세로 특징 위주로 남긴다.
      */
     private Mat featureImage(Mat roiColor) {
         Mat gray = new Mat();
         Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
-        // 어두운 배경이면 반전 → 표기를 항상 "밝은 배경 위 어두운 선"으로 정규화
+        // 어두운 패널이면 반전 → 표기를 항상 "밝은 배경 위 어두운 선"으로 정규화
         if (Core.mean(gray).val[0] < 100) Core.bitwise_not(gray, gray);
 
-        Mat bin = new Mat();
-        Imgproc.adaptiveThreshold(gray, bin, 255,
-            Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY_INV, 15, 10);
-        gray.release();
+        Mat k  = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
+        Mat bh = new Mat();
+        Imgproc.morphologyEx(gray, bh, Imgproc.MORPH_BLACKHAT, k);
+        k.release(); gray.release();
 
-        // 긴 가로 오선 제거
+        Mat bin = new Mat();
+        Imgproc.threshold(bh, bin, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+        bh.release();
+
+        // 긴 가로 오선 제거(매칭은 세로 획이 핵심)
         int kw = Math.max(15, bin.cols() / 3);
         Mat hk    = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kw, 1));
         Mat lines = new Mat();
         Imgproc.morphologyEx(bin, lines, Imgproc.MORPH_OPEN, hk);
         Core.subtract(bin, lines, bin);
         hk.release(); lines.release();
-
-        // 잡티(작은 점) 제거
-        Mat dk = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(2, 2));
-        Imgproc.morphologyEx(bin, bin, Imgproc.MORPH_OPEN, dk);
-        dk.release();
         return bin;
     }
 
@@ -296,8 +322,7 @@ public class FrameExtractor {
             int w = Math.min(chunkW, Pw - x);
             if (w < 40) break;
 
-            Mat chunk = new Mat(panorama, new Rect(x, 0, w, Ph));
-            Mat out   = maybeInvert(chunk);
+            Mat out = new Mat(panorama, new Rect(x, 0, w, Ph)).clone();
 
             if (w < chunkW) {                          // 마지막 조각 패딩(과대 확대 방지)
                 Mat padded = new Mat(Ph, chunkW, out.type(), new Scalar(255, 255, 255));
@@ -315,16 +340,34 @@ public class FrameExtractor {
         return saved;
     }
 
-    /** 어두운 배경 영상이면 색 반전(흰 배경+검정 내용), 아니면 복사본 반환. */
-    private Mat maybeInvert(Mat src) {
+    /**
+     * 출력용 배경 제거: 블랙햇으로 어두운 표기(오선 포함)만 추출해 "흰 종이 + 검은 표기"로 만든다.
+     * 반투명 배경(뮤비/연주자)·과밝은 패널을 전역 밝기와 무관하게 제거한다(실측 검증됨).
+     * 매칭용 featureImage와 달리 가로 오선은 보존한다(악보의 일부).
+     */
+    private Mat cleanForOutput(Mat panoBGR) {
         Mat gray = new Mat();
-        Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
-        double meanBrightness = Core.mean(gray).val[0];
+        Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
+        if (Core.mean(gray).val[0] < 100) Core.bitwise_not(gray, gray);
+
+        // 대비 보정(CLAHE): fade-in 등으로 흐린 구간의 표기도 출력에서 살린다.
+        Mat eq = new Mat();
+        Imgproc.createCLAHE(2.0, new Size(8, 8)).apply(gray, eq);
         gray.release();
 
+        Mat k  = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
+        Mat bh = new Mat();
+        Imgproc.morphologyEx(eq, bh, Imgproc.MORPH_BLACKHAT, k);
+        k.release(); eq.release();
+
+        Core.multiply(bh, new Scalar(3.0), bh);          // 옅은 표기 대비 강화(8U 포화)
+        Mat inv = new Mat();
+        Core.bitwise_not(bh, inv);                        // 255-bh → 흰 배경 + 검은 표기
+        bh.release();
+
         Mat out = new Mat();
-        if (meanBrightness < 100) Core.bitwise_not(src, out);
-        else                      src.copyTo(out);
+        Imgproc.cvtColor(inv, out, Imgproc.COLOR_GRAY2BGR);
+        inv.release();
         return out;
     }
 

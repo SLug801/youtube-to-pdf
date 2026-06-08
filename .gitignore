@@ -4,3 +4,7 @@ ocr_debug_*.png
 *.class
 .DS_Store
 Thumbs.db
+
+# 중첩된 중복 복사본(자체 .git 보유) — 빌드는 루트 src/ 사용
+youtube-to-pdf/
+.vscode/
