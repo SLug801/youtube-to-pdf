@@ -115,9 +115,15 @@ public class FrameExtractor {
     }
 
     private final RoiConfig roi;
+    private final SheetMode mode;
 
     public FrameExtractor(RoiConfig roi) {
-        this.roi = roi;
+        this(roi, SheetMode.TRANSLUCENT);
+    }
+
+    public FrameExtractor(RoiConfig roi, SheetMode mode) {
+        this.roi  = roi;
+        this.mode = (mode != null) ? mode : SheetMode.TRANSLUCENT;
     }
 
     public List<Path> extract(Path videoPath, Path outDir) throws Exception {
@@ -151,8 +157,8 @@ public class FrameExtractor {
 
             log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | 모드=전폭매칭(검사%dfps, %d프레임마다)",
                 width, height, fps, durationSec, SCAN_FPS, frameSkip);
-            log(logger, "[설정] ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
-                roi, tw, MIN_SCORE, STABLE_SCORE);
+            log(logger, "[설정] 악보모드=%s | ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
+                mode.label, roi, tw, MIN_SCORE, STABLE_SCORE);
 
             List<Mat> colorStrips = new ArrayList<>();
             Mat   comFeat   = null;       // 파노라마 프런티어에 해당하는 "확정 화면"의 특징(roiW 폭)
@@ -329,6 +335,8 @@ public class FrameExtractor {
      * 배경 잡음이 훨씬 적음, 실측 검증됨). 가로 오선은 제거해 세로 특징 위주로 남긴다.
      */
     private Mat featureImage(Mat roiColor) {
+        if (mode == SheetMode.TRANSPARENT) return featureImageTransparent(roiColor);
+        // ── 이하 반투명(TRANSLUCENT) 기존 로직 (그대로 보존) ──
         Mat gray = new Mat();
         Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
         // 어두운 패널이면 반전 → 표기를 항상 "밝은 배경 위 어두운 선"으로 정규화
@@ -388,6 +396,8 @@ public class FrameExtractor {
      * 매칭용 featureImage와 달리 가로 오선은 보존한다(악보의 일부).
      */
     private Mat cleanForOutput(Mat panoBGR) {
+        if (mode == SheetMode.TRANSPARENT) return cleanForOutputTransparent(panoBGR);
+        // ── 이하 반투명(TRANSLUCENT) 기존 로직 (그대로 보존) ──
         Mat gray = new Mat();
         Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
         if (Core.mean(gray).val[0] < 100) Core.bitwise_not(gray, gray);
@@ -452,6 +462,72 @@ public class FrameExtractor {
             keepMask.release(); cleaned.release();
         }
         labels.release(); stats.release();
+    }
+
+    // ── 투명(TRANSPARENT) 모드 전용 ───────────────────────────────────────────
+    // 패널 없이 영상 위에 악보가 직접 올라가고, 표기 색이 흰색일 수도(밝은 표기) 검정일 수도
+    // (어두운 표기) 있다. tophat=밝은 가는 구조, blackhat=어두운 가는 구조를 각각 뽑아 합치면,
+    // 표기 색 극성과 무관하게 표기만 남기고 완만한 배경은 억제된다.
+
+    /** 투명 모드 매칭용 특징(밝은/어두운 표기 모두, 세로 획 위주). */
+    private Mat featureImageTransparent(Mat roiColor) {
+        Mat gray = new Mat();
+        Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
+
+        Mat k   = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
+        Mat top = new Mat(), bot = new Mat();
+        Imgproc.morphologyEx(gray, top, Imgproc.MORPH_TOPHAT,   k);   // 밝은 표기
+        Imgproc.morphologyEx(gray, bot, Imgproc.MORPH_BLACKHAT, k);   // 어두운 표기
+        k.release(); gray.release();
+
+        Mat marks = new Mat();
+        Core.max(top, bot, marks);                                    // 둘 중 강한 쪽
+        top.release(); bot.release();
+
+        Mat bin = new Mat();
+        Imgproc.threshold(marks, bin, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+        marks.release();
+
+        // 긴 가로 오선 제거(매칭은 세로 획이 핵심) — 반투명과 동일
+        int kw = Math.max(15, bin.cols() / 3);
+        Mat hk    = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kw, 1));
+        Mat lines = new Mat();
+        Imgproc.morphologyEx(bin, lines, Imgproc.MORPH_OPEN, hk);
+        Core.subtract(bin, lines, bin);
+        hk.release(); lines.release();
+        return bin;
+    }
+
+    /** 투명 모드 출력 정리: 밝은/어두운 표기를 모두 흰 종이+검은 표기로. */
+    private Mat cleanForOutputTransparent(Mat panoBGR) {
+        Mat gray = new Mat();
+        Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
+
+        Mat eq = new Mat();
+        Imgproc.createCLAHE(2.0, new Size(8, 8)).apply(gray, eq);     // 대비 보정
+        gray.release();
+
+        Mat k   = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
+        Mat top = new Mat(), bot = new Mat();
+        Imgproc.morphologyEx(eq, top, Imgproc.MORPH_TOPHAT,   k);
+        Imgproc.morphologyEx(eq, bot, Imgproc.MORPH_BLACKHAT, k);
+        k.release(); eq.release();
+
+        Mat marks = new Mat();
+        Core.max(top, bot, marks);                                    // 표기 강도(극성 무관)
+        top.release(); bot.release();
+
+        Core.multiply(marks, new Scalar(3.0), marks);                 // 옅은 표기 대비 강화
+        if (DENOISE_OUTPUT) denoiseMarks(marks);                      // 배경 텍스처·점 잡티 제거
+
+        Mat inv = new Mat();
+        Core.bitwise_not(marks, inv);                                 // 흰 배경 + 검은 표기
+        marks.release();
+
+        Mat out = new Mat();
+        Imgproc.cvtColor(inv, out, Imgproc.COLOR_GRAY2BGR);
+        inv.release();
+        return out;
     }
 
     // ── 유틸 ─────────────────────────────────────────────────────────────────

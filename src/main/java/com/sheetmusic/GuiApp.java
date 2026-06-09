@@ -26,8 +26,10 @@ import java.util.stream.Stream;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
+import javax.swing.JToggleButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -60,6 +62,7 @@ public class GuiApp {
     private javax.swing.Timer elapsedTimer;
     private long conversionStartMs;
     private FrameExtractor.RoiConfig currentRoi = FrameExtractor.RoiConfig.defaultConfig();
+    private SheetMode currentMode = SheetMode.TRANSLUCENT;
     private SwingWorker<?, ?> currentWorker = null;
 
     // 프리뷰에서 받은 영상 캐시 — 같은 URL 변환 시 재다운로드 방지
@@ -161,6 +164,31 @@ public class GuiApp {
         hintLabel.setForeground(Color.DARK_GRAY);
         gbc.gridy = row++;
         panel.add(hintLabel, gbc);
+
+        // 악보 배경 모드 선택(버튼)
+        gbc.gridy = row++;
+        panel.add(new JLabel("악보 배경 모드:"), gbc);
+
+        JToggleButton modeTranslucent = new JToggleButton(SheetMode.TRANSLUCENT.label, true);
+        JToggleButton modeTransparent = new JToggleButton(SheetMode.TRANSPARENT.label);
+        JToggleButton modeOpaque      = new JToggleButton(SheetMode.OPAQUE.label);
+        modeOpaque.setEnabled(false);                 // 불투명 모드는 준비 중
+        modeOpaque.setToolTipText("준비 중");
+
+        ButtonGroup modeGroup = new ButtonGroup();
+        modeGroup.add(modeTranslucent);
+        modeGroup.add(modeTransparent);
+        modeGroup.add(modeOpaque);
+        modeTranslucent.addActionListener(e -> currentMode = SheetMode.TRANSLUCENT);
+        modeTransparent.addActionListener(e -> currentMode = SheetMode.TRANSPARENT);
+        modeOpaque.addActionListener(e -> currentMode = SheetMode.OPAQUE);
+
+        JPanel modeRow = new JPanel(new GridLayout(1, 3, 6, 0));
+        modeRow.add(modeTranslucent);
+        modeRow.add(modeTransparent);
+        modeRow.add(modeOpaque);
+        gbc.gridy = row++;
+        panel.add(modeRow, gbc);
 
         statusLabel = new JLabel("준비 완료");
         statusLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
@@ -332,12 +360,15 @@ public class GuiApp {
         final Path reuseVideo =
             (cachedVideo != null && url.equals(cachedUrl) && Files.exists(cachedVideo))
                 ? cachedVideo : null;
+        final SheetMode mode = currentMode;
+
+        appendLog("악보 배경 모드: " + mode.label);
 
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
                 return VideoProcessor.process(url, finalFilename.replaceAll("\\.pdf$", ""),
-                    outputPdf, currentRoi, this::publish, this, reuseVideo);
+                    outputPdf, currentRoi, this::publish, this, reuseVideo, mode);
             }
 
             @Override
