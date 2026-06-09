@@ -172,8 +172,9 @@ public class GuiApp {
         JToggleButton modeTranslucent = new JToggleButton(SheetMode.TRANSLUCENT.label, true);
         JToggleButton modeTransparent = new JToggleButton(SheetMode.TRANSPARENT.label);
         JToggleButton modeOpaque      = new JToggleButton(SheetMode.OPAQUE.label);
-        modeOpaque.setEnabled(false);                 // 불투명 모드는 준비 중
-        modeOpaque.setToolTipText("준비 중");
+        modeTranslucent.setToolTipText("반투명 패널 위 악보(뮤비/연주 배경이 옅게 비침)");
+        modeTransparent.setToolTipText("배경 위에 악보가 직접 그려진 형태(배경이 단순한 영상에 적합)");
+        modeOpaque.setToolTipText("흰 배경 + 검정 악보(스캔/PDF형). 가장 깨끗하게 변환됨");
 
         ButtonGroup modeGroup = new ButtonGroup();
         modeGroup.add(modeTranslucent);
