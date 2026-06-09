@@ -56,17 +56,41 @@ public class FrameExtractor {
     }
 
     // ── 스캔/스티칭 파라미터 ────────────────────────────────────────────────
-    private static final int    SCAN_FPS     = 10;      // 초당 검사 프레임
-    private static final double TPL_RATIO    = 0.12;    // 매칭 템플릿 폭(ROI 폭 대비). 작을수록
-                                                        //   작은 중복·큰 점프 스크롤까지 검출.
+    private static final int    SCAN_FPS     = 20;      // (was 10) 초당 검사 프레임. 높일수록 큰 점프
+                                                        //   스크롤을 작은 스텝 여러 개로 쪼개 봐서, 한 스텝에
+                                                        //   들어가는 반복 패턴이 줄고 매칭 정확↑(중복·누락 동시 감소).
+                                                        //   대신 처리 시간이 비례해 늘어난다.
+    private static final double TPL_RATIO    = 0.15;    // (was 0.12) 매칭 템플릿 폭(ROI 폭 대비).
+                                                        //   크게 잡을수록 템플릿이 더 고유해져
+                                                        //   반복 패턴 오매칭(중복·이상 절단)이 준다.
+                                                        //   대신 검출 가능한 최대 점프는 (roiW-tw)로 줄어듦.
     private static final int    TPL_INSET    = 0;       // 템플릿을 현재 프레임 왼쪽에서 떼는 위치
-    private static final double MIN_SCORE    = 0.35;    // 겹침 신뢰 임계(이상이면 dx 채택)
-    private static final double MARGIN       = 0.12;    // peak−zero 마진(실제 스크롤 vs 정지/주기 오매칭)
-    private static final double SEED_REFRESH_SCORE = 0.80; // 첫 스크롤 전 동일화면 판정(시드 갱신)
+    private static final double MIN_SCORE    = 0.40;    // (was 0.35) 겹침 신뢰 임계. 높을수록 약하고
+                                                        //   모호한 매칭으로 dx를 잘못 잡는 일이 준다.
+    private static final double MARGIN       = 0.15;    // (was 0.12) peak−zero 마진. 높을수록 실제
+                                                        //   스크롤만 채택 → 미세 false 스크롤(중복 슬라이버) 차단.
+    private static final double SEED_REFRESH_SCORE = 0.70; // (was 0.80) 첫 스크롤 전 동일화면 판정(시드 갱신).
+                                                           //   낮출수록 페이드인 중 더 또렷한 프레임으로 시드 교체
+                                                           //   → 첫 화면이 하얗게 나오는 문제 완화.
     private static final double NEWPAGE_MAX_SCORE   = 0.30; // 이보다 매칭이 낮아야 "새 페이지" 후보
     private static final double STABLE_SCORE = 0.75;    // 정지(동일 화면) 판정 임계
-    private static final int    MIN_SHIFT    = 3;       // 이보다 작은 dx는 정지로 간주
+    private static final int    MIN_SHIFT    = 4;       // (was 3) 이보다 작은 dx는 정지로 간주.
+                                                        //   지터성 미세 중복을 차단(FPS↑로 스텝이 작아져 4 유지).
     private static final double CONTENT_MIN  = 0.004;   // 인트로(빈 화면) 판별 임계
+
+    // ── 2-밴드 합의(consensus) 검증 ──────────────────────────────────────────
+    // 현재 프레임의 서로 다른 두 위치 밴드로 각각 dx를 재서, 둘이 일치할 때만 스크롤로 인정한다.
+    // 강체 이동(진짜 스크롤)은 두 밴드 dx가 같지만, 빈 마디·반복 패턴의 주기적 오매칭은
+    // 두 밴드가 서로 다른 오프셋에 꽂혀 불일치 → 거부(중복 append 차단).
+    private static final double SECOND_BAND_RATIO = 0.30; // 둘째 밴드를 떼는 위치(ROI 폭 대비)
+    private static final int    DX_AGREE_TOL      = 6;    // 두 밴드 dx 허용 오차(px) — 이내면 일치로 봄
+
+    // ── 최종 출력 배경 노이즈 제거 ───────────────────────────────────────────
+    private static final boolean DENOISE_OUTPUT  = true;  // 최종 결과물 노이즈 한 번 더 거르기 on/off
+    private static final int     NOISE_FLOOR      = 45;   // (0~255) 대비 부스트 후 이 밝기 미만은
+                                                          //   배경 텍스처로 보고 제거. 높일수록 더 빡세게.
+    private static final int     NOISE_MIN_AREA   = 8;    // 이보다 작은 고립 덩어리(연결요소) 삭제.
+                                                          //   면적 기준이라 긴 오선·기둥·숫자는 보존, 점 잡티만 제거.
 
     public record RoiConfig(
             double topRatio, double bottomRatio,
@@ -122,10 +146,11 @@ public class FrameExtractor {
             int roiH    = roiRect.height;
             int tw      = clamp((int)(roiW * TPL_RATIO), 8, roiW - 1);
 
-            long stepUs = (long)(1_000_000.0 / SCAN_FPS);
+            // 순차 디코딩하며 N프레임마다 한 번 검사한다(매 샘플 seek 제거 → 속도↑, 결과 동일).
+            int frameSkip = Math.max(1, (int) Math.round((fps > 0 ? fps : SCAN_FPS) / SCAN_FPS));
 
-            log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | 모드=전폭매칭(%dfps)",
-                width, height, fps, durationSec, SCAN_FPS);
+            log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | 모드=전폭매칭(검사%dfps, %d프레임마다)",
+                width, height, fps, durationSec, SCAN_FPS, frameSkip);
             log(logger, "[설정] ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
                 roi, tw, MIN_SCORE, STABLE_SCORE);
 
@@ -136,22 +161,26 @@ public class FrameExtractor {
             boolean started = false;
             boolean scrolled = false;     // 첫 스크롤 발생 여부(이전엔 시드 갱신 허용)
             int   scrollCnt = 0, pageCnt = 0, staticCnt = 0;   // 스크롤 / 새 페이지 / 정지
+            int   rejectCnt = 0;          // 합의 불일치로 거부된 스크롤 후보 수
+            int   secondInset = clamp((int)(roiW * SECOND_BAND_RATIO), tw, Math.max(tw, roiW - 2 * tw));
+            int   reach2 = roiW - tw - secondInset;   // 둘째 밴드로 확인 가능한 최대 dx
 
             Java2DFrameConverter converter = new Java2DFrameConverter();
-            long currentUs = 0, sampleIdx = 0;
+            long currentUs = 0, sampleIdx = 0, grabbedFrames = 0;
             long startMs   = System.currentTimeMillis();
             int  lastDx = 0; double lastScore = 0;
 
-            while (lengthUs <= 0 || currentUs <= lengthUs) {
+            while (true) {
                 if (Thread.currentThread().isInterrupted())
                     throw new InterruptedException("취소됨");
 
-                grabber.setTimestamp(currentUs);
                 Frame videoFrame = grabber.grabImage();
                 if (videoFrame == null) break;
+                if (grabbedFrames++ % frameSkip != 0) continue;   // 검사 대상이 아닌 프레임은 디코딩만 하고 건너뜀
+                currentUs = grabber.getTimestamp();
 
                 Mat frame = frameToMat(videoFrame, converter);
-                if (frame.empty()) { currentUs += stepUs; sampleIdx++; continue; }
+                if (frame.empty()) { sampleIdx++; continue; }
 
                 Mat roiColor = new Mat(frame, roiRect).clone();
                 frame.release();
@@ -161,7 +190,7 @@ public class FrameExtractor {
                     double cr = (double) Core.countNonZero(feat) / feat.total();
                     if (cr < CONTENT_MIN) {                 // 인트로(빈 화면) 스킵
                         feat.release(); roiColor.release();
-                        currentUs += stepUs; sampleIdx++;
+                        sampleIdx++;
                         continue;
                     }
                     // 첫 콘텐츠 프레임: 화면 전체를 시드로
@@ -172,7 +201,7 @@ public class FrameExtractor {
                     started  = true;
                     feat.release(); roiColor.release();
                     log(logger, "[콘텐츠 시작] t=%.1fs (시드 %dpx)", currentUs / 1_000_000.0, roiW);
-                    currentUs += stepUs; sampleIdx++;
+                    sampleIdx++;
                     continue;
                 }
 
@@ -187,8 +216,22 @@ public class FrameExtractor {
                 // 실제 스크롤: dx 위치가 dx=0보다 뚜렷이(MARGIN) 더 잘 맞을 때만 채택.
                 // → 빈/희박한 마디의 미세 스크롤도 잡고(누락 방지), 정지·주기적 오매칭(peak≈zero)은
                 //   거른다(중복 방지). 상관·diff 절대값만으론 둘을 못 가르므로 마진이 핵심.
-                boolean isScroll = dx >= MIN_SHIFT && dx <= roiW - tw
-                                && score >= MIN_SCORE && margin >= MARGIN;
+                boolean baseScroll = dx >= MIN_SHIFT && dx <= roiW - tw
+                                  && score >= MIN_SCORE && margin >= MARGIN;
+
+                // 2-밴드 합의: 다른 위치 밴드로도 같은 dx가 나와야 진짜 스크롤로 인정한다.
+                // 빈 마디·반복 패턴의 주기적 오매칭은 두 밴드가 서로 다른 오프셋에 꽂혀 불일치 → 거부(중복 차단).
+                // 단, dx가 둘째 밴드 사정거리(reach2)를 넘으면 확인 불가 → 단일 밴드 판정 유지(큰 점프 누락 방지).
+                boolean isScroll = baseScroll;
+                if (baseScroll && dx <= reach2) {
+                    double[] m2 = matchOffset(comFeat, feat, tw, secondInset);
+                    // 둘째 밴드가 '확신을 갖고(점수 충분)' 다른 dx를 가리킬 때만 거부(주기 오매칭 차단).
+                    // 둘째 밴드 점수가 낮으면 = 특징 없는 빈 구간이라 정보가 없으므로 거부하지 않는다
+                    //   (인트로·빈 마디의 진짜 스크롤까지 버려 누락되던 문제 해결).
+                    boolean confidentDisagree = m2[1] >= MIN_SCORE
+                                             && Math.abs(dx - (int) m2[0]) > DX_AGREE_TOL;
+                    if (confidentDisagree) { isScroll = false; rejectCnt++; }
+                }
 
                 if (isScroll) {
                     colorStrips.add(new Mat(roiColor, new Rect(roiW - dx, 0, dx, roiH)).clone());
@@ -226,12 +269,11 @@ public class FrameExtractor {
                 if (sampleIdx > 0 && sampleIdx % (SCAN_FPS * 8) == 0) {
                     double pct     = lengthUs > 0 ? (double) currentUs / lengthUs * 100 : -1;
                     long   elapsed = (System.currentTimeMillis() - startMs) / 1000;
-                    log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | 스크롤%d 페이지%d 정지%d",
+                    log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | 스크롤%d 페이지%d 정지%d 합의거부%d",
                         Math.max(pct, 0), elapsed, canvasW, lastDx, lastScore,
-                        scrollCnt, pageCnt, staticCnt);
+                        scrollCnt, pageCnt, staticCnt, rejectCnt);
                 }
 
-                currentUs += stepUs;
                 sampleIdx++;
             }
 
@@ -246,8 +288,8 @@ public class FrameExtractor {
             Mat panorama = new Mat();
             Core.hconcat(colorStrips, panorama);
             for (Mat s : colorStrips) s.release();
-            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | 스크롤%d 페이지%d 정지%d",
-                panorama.cols(), panorama.rows(), scrollCnt, pageCnt, staticCnt);
+            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | 스크롤%d 페이지%d 정지%d 합의거부%d",
+                panorama.cols(), panorama.rows(), scrollCnt, pageCnt, staticCnt, rejectCnt);
 
             Mat cleaned = cleanForOutput(panorama);   // 반투명/배경 제거 → 흰 종이+검은 표기
             panorama.release();
@@ -361,6 +403,7 @@ public class FrameExtractor {
         k.release(); eq.release();
 
         Core.multiply(bh, new Scalar(3.0), bh);          // 옅은 표기 대비 강화(8U 포화)
+        if (DENOISE_OUTPUT) denoiseMarks(bh);            // 배경 텍스처·점 잡티 한 번 더 제거
         Mat inv = new Mat();
         Core.bitwise_not(bh, inv);                        // 255-bh → 흰 배경 + 검은 표기
         bh.release();
@@ -369,6 +412,46 @@ public class FrameExtractor {
         Imgproc.cvtColor(inv, out, Imgproc.COLOR_GRAY2BGR);
         inv.release();
         return out;
+    }
+
+    /**
+     * 출력 표기(marks: 밝을수록 표기)에서 배경 노이즈를 한 번 더 제거한다.
+     *  1) 밝기 바닥값(NOISE_FLOOR) 미만 → 0 : 반투명 배경이 옅게 비친 저대비 텍스처 제거.
+     *  2) 작은 고립 덩어리(NOISE_MIN_AREA 미만) 제거 : 점 잡티만 삭제하고, 면적이 큰
+     *     오선·기둥·숫자는 보존(median 방식과 달리 가는 선을 지우지 않음).
+     */
+    private void denoiseMarks(Mat marks) {
+        // 1) 약한 배경 텍스처 제거
+        Imgproc.threshold(marks, marks, NOISE_FLOOR, 0, Imgproc.THRESH_TOZERO);
+        if (NOISE_MIN_AREA <= 1) return;
+
+        // 2) 작은 고립 덩어리 제거(면적 기준)
+        Mat bin = new Mat();
+        Imgproc.threshold(marks, bin, 0, 255, Imgproc.THRESH_BINARY);
+        Mat labels = new Mat(), stats = new Mat(), cent = new Mat();
+        int n = Imgproc.connectedComponentsWithStats(bin, labels, stats, cent, 8, CvType.CV_32S);
+        bin.release(); cent.release();
+
+        if (n > 1) {
+            boolean[] keep = new boolean[n];          // keep[0]=배경은 false 유지
+            for (int i = 1; i < n; i++)
+                keep[i] = stats.get(i, Imgproc.CC_STAT_AREA)[0] >= NOISE_MIN_AREA;
+
+            int total = (int) labels.total();
+            int[] lab = new int[total];
+            labels.get(0, 0, lab);
+            byte[] mask = new byte[total];
+            for (int p = 0; p < total; p++)
+                if (keep[lab[p]]) mask[p] = (byte) 0xFF;
+
+            Mat keepMask = new Mat(labels.rows(), labels.cols(), CvType.CV_8U);
+            keepMask.put(0, 0, mask);
+            Mat cleaned = Mat.zeros(marks.size(), marks.type());
+            marks.copyTo(cleaned, keepMask);
+            cleaned.copyTo(marks);
+            keepMask.release(); cleaned.release();
+        }
+        labels.release(); stats.release();
     }
 
     // ── 유틸 ─────────────────────────────────────────────────────────────────

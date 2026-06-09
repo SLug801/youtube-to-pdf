@@ -56,6 +56,9 @@ public class GuiApp {
     private PreviewPanel previewPanel;
     private CropPreviewPanel cropPreviewPanel;
     private JTextArea logArea;
+    private JLabel timerLabel;
+    private javax.swing.Timer elapsedTimer;
+    private long conversionStartMs;
     private FrameExtractor.RoiConfig currentRoi = FrameExtractor.RoiConfig.defaultConfig();
     private SwingWorker<?, ?> currentWorker = null;
 
@@ -186,7 +189,7 @@ public class GuiApp {
         return split;
     }
 
-    private JScrollPane createLogPanel() {
+    private JPanel createLogPanel() {
         logArea = new JTextArea();
         logArea.setEditable(false);
         logArea.setLineWrap(true);
@@ -196,8 +199,17 @@ public class GuiApp {
 
         JScrollPane scroll = new JScrollPane(logArea);
         scroll.setBorder(new TitledBorder("변환 로그"));
-        scroll.setPreferredSize(new Dimension(0, 160));
-        return scroll;
+
+        // 로그 박스 위쪽 — 변환 중 실시간 소요 시간만 표시
+        timerLabel = new JLabel("소요 시간: 00:00");
+        timerLabel.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        timerLabel.setFont(timerLabel.getFont().deriveFont(java.awt.Font.BOLD, 13f));
+
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.add(timerLabel, BorderLayout.NORTH);
+        panel.add(scroll, BorderLayout.CENTER);
+        panel.setPreferredSize(new Dimension(0, 184));
+        return panel;
     }
 
     // ── 액션 ─────────────────────────────────────────────────────────────────
@@ -289,7 +301,17 @@ public class GuiApp {
             return;
         }
 
-        String finalFilename = filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf";
+        // 확장자 떼고 → Windows 금지문자(\ / : * ? " < > |) 정리 → 다시 .pdf
+        String base = filename.replaceAll("(?i)\\.pdf$", "");
+        String sanitized = sanitizeFilename(base);
+        if (sanitized.isEmpty()) {
+            JOptionPane.showMessageDialog(frame, "파일명에 사용할 수 있는 문자가 없습니다.", "입력 필요", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (!sanitized.equals(base)) {
+            appendLog("[안내] 파일명에 사용할 수 없는 문자가 있어 정리했습니다: \"" + sanitized + "\"");
+        }
+        String finalFilename = sanitized + ".pdf";
         Path targetFolder = Paths.get(folderField.getText().trim());
         try {
             Files.createDirectories(targetFolder);
@@ -304,6 +326,7 @@ public class GuiApp {
         cancelButton.setEnabled(true);
         appendLog("변환 시작...");
         statusLabel.setText("변환 중...");
+        startElapsedTimer();
 
         // 같은 URL이면 프리뷰에서 받은 영상 재사용
         final Path reuseVideo =
@@ -339,6 +362,8 @@ public class GuiApp {
                     appendLog("변환 실패: " + e.getMessage());
                     statusLabel.setText("오류 발생");
                 } finally {
+                    String total = stopElapsedTimer();
+                    appendLog("총 소요 시간: " + total);
                     setBusy(false);
                     cancelButton.setEnabled(false);
                     currentWorker = null;
@@ -379,6 +404,38 @@ public class GuiApp {
             logArea.append(message + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength());
         });
+    }
+
+    /** 변환 시작 시각을 기록하고 1초마다 소요 시간 라벨을 갱신한다. */
+    private void startElapsedTimer() {
+        conversionStartMs = System.currentTimeMillis();
+        timerLabel.setText("소요 시간: 00:00");
+        if (elapsedTimer != null && elapsedTimer.isRunning()) elapsedTimer.stop();
+        elapsedTimer = new javax.swing.Timer(1000, e ->
+            timerLabel.setText("소요 시간: " + formatDuration(System.currentTimeMillis() - conversionStartMs)));
+        elapsedTimer.start();
+    }
+
+    /** 타이머를 멈추고 최종 소요 시간 문자열을 반환(라벨도 고정값으로 갱신). */
+    private String stopElapsedTimer() {
+        if (elapsedTimer != null) elapsedTimer.stop();
+        String total = formatDuration(System.currentTimeMillis() - conversionStartMs);
+        timerLabel.setText("소요 시간: " + total);
+        return total;
+    }
+
+    /** Windows에서 못 쓰는 파일명 문자(\ / : * ? " < > | 및 제어문자)를 _로 바꾸고 끝의 공백·점을 제거. */
+    private static String sanitizeFilename(String name) {
+        String cleaned = name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1F]", "_");
+        cleaned = cleaned.replaceAll("[ .]+$", "").trim();   // 끝의 공백/점 제거(Windows 제약)
+        return cleaned;
+    }
+
+    private static String formatDuration(long ms) {
+        long totalSec = Math.max(0, ms) / 1000;
+        long h = totalSec / 3600, m = (totalSec % 3600) / 60, s = totalSec % 60;
+        return h > 0 ? String.format("%d:%02d:%02d", h, m, s)
+                     : String.format("%02d:%02d", m, s);
     }
 
     private void onSelectionChanged(FrameExtractor.RoiConfig roi) {
