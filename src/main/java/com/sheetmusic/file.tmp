@@ -1,0 +1,379 @@
+package com.sheetmusic;
+
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.imageio.ImageIO;
+
+import org.bytedeco.javacpp.Loader;
+import org.bytedeco.opencv.opencv_java;
+import org.opencv.core.Core;
+import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
+import org.opencv.core.Rect;
+import org.opencv.core.Size;
+import org.opencv.imgcodecs.Imgcodecs;
+import org.opencv.imgproc.Imgproc;
+import org.opencv.videoio.VideoCapture;
+import org.opencv.videoio.Videoio;
+
+public class FrameExtractor {
+
+    static {
+        try {
+            Loader.load(opencv_java.class);
+        } catch (UnsatisfiedLinkError e) {
+            throw new RuntimeException("OpenCV 라이브러리 로드 실패", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 튜닝 파라미터
+    // -------------------------------------------------------------------------
+    /** 기준 프레임 대비 이 비율 이상 변하면 "스크롤 시작" */
+    private static final double CHANGE_THRESHOLD = 0.02;   // 2%
+
+    /** 연속 샘플 간 이 비율 이하면 "멈춤" */
+    private static final double STABLE_THRESHOLD = 0.015;  // 1.5%
+
+    /** 몇 번 연속 안정화되면 저장 */
+    private static final int STABLE_COUNT_NEEDED = 2; // 더 빠르게 반응하여 마디 누락 방지
+
+    /** diff 이진화 노이즈 제거 기준 */
+    private static final int DIFF_BINARIZE = 20;
+    // -------------------------------------------------------------------------
+
+    public record RoiConfig(
+            double topRatio, double bottomRatio,
+            double leftRatio, double rightRatio) {
+
+        public static RoiConfig defaultConfig() {
+            return new RoiConfig(0.70, 1.00, 0.00, 1.00);
+        }
+
+        public static RoiConfig parse(String s) {
+            String[] p = s.split(",");
+            if (p.length != 4) throw new IllegalArgumentException("형식: top,bottom,left,right");
+            return new RoiConfig(
+                Double.parseDouble(p[0].trim()), Double.parseDouble(p[1].trim()),
+                Double.parseDouble(p[2].trim()), Double.parseDouble(p[3].trim()));
+        }
+
+        @Override public String toString() {
+            return String.format("상단%.0f%%~하단%.0f%%, 좌%.0f%%~우%.0f%%",
+                topRatio*100, bottomRatio*100, leftRatio*100, rightRatio*100);
+        }
+    }
+
+    private final RoiConfig roi;
+    private final int totalMeasures;
+
+    public FrameExtractor(double threshold, RoiConfig roi, int totalMeasures) {
+        this.roi = roi;
+        this.totalMeasures = totalMeasures;
+    }
+
+    public List<Path> extract(Path videoPath, Path outDir) throws Exception {
+        return extract(videoPath, outDir, null);
+    }
+
+    public List<Path> extract(Path videoPath, Path outDir, ProgressLogger logger) throws Exception {
+        Files.createDirectories(outDir);
+
+        VideoCapture cap = new VideoCapture(videoPath.toString());
+        if (!cap.isOpened()) throw new IllegalStateException("영상 열기 실패: " + videoPath);
+
+        double fps       = cap.get(Videoio.CAP_PROP_FPS);
+        long totalFrames = (long) cap.get(Videoio.CAP_PROP_FRAME_COUNT);
+        int  width       = (int) cap.get(Videoio.CAP_PROP_FRAME_WIDTH);
+        int  height      = (int) cap.get(Videoio.CAP_PROP_FRAME_HEIGHT);
+        Rect roiRect     = makeRoiRect(width, height);
+        int  step        = Math.max(1, (int)(fps / Config.FRAME_SAMPLE_RATE));
+
+        log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | step=%d",
+            width, height, fps, totalFrames / fps, step);
+        log(logger, "[파라미터] CHANGE=%.3f STABLE=%.3f COUNT=%d",
+            CHANGE_THRESHOLD, STABLE_THRESHOLD, STABLE_COUNT_NEEDED);
+
+        List<Path> saved = new ArrayList<>();
+
+        Mat  lastSavedClean  = null;
+        Mat  prevSampleClean = null;
+        int  stableCount     = 0;
+        int  lastSavedMaxMeasure = -1;
+        int  measuresCaptured = 0;
+        List<MeasureDetector.MeasureSegment> lastSavedSegments = null;
+
+        Mat frame = new Mat();
+        long frameIdx = 0;
+        long startMs  = System.currentTimeMillis();
+
+        while (cap.read(frame)) {
+            if (Thread.currentThread().isInterrupted())
+                throw new InterruptedException("취소됨");
+
+            if (frameIdx % step != 0 && frameIdx != totalFrames - 1) {
+                frameIdx++;
+                continue;
+            }
+
+            Mat roiMat     = new Mat(frame, roiRect);
+            Mat cleanFrame = preprocess(roiMat);
+            roiMat.release();
+
+            // ── 첫 프레임 ──────────────────────────────────────────────────
+            if (lastSavedClean == null) {
+                log(logger, "[첫 프레임] frame=%d", frameIdx);
+                List<MeasureDetector.MeasureSegment> segs =
+                    MeasureDetector.extractMeasureSegments(frame, roi);
+                log(logger, "[첫 프레임] OCR 세그먼트=%d개", segs.size());
+
+                // OCR 성공 여부와 관계없이 첫 프레임은 무조건 저장
+                Path p = saveRoi(frame, roiRect, outDir, saved.size());
+                saved.add(p);
+                measuresCaptured += 2; // 첫 장은 보통 2마디 이상 포함
+                log(logger, "FRAME_SAVED:%s", p.toAbsolutePath());
+
+                if (!segs.isEmpty()) {
+                    lastSavedMaxMeasure = segs.stream()
+                        .mapToInt(MeasureDetector.MeasureSegment::measureNumber)
+                        .filter(n -> n > 0)
+                        .max().orElse(-1);
+                    if (lastSavedSegments != null)
+                        lastSavedSegments.forEach(MeasureDetector.MeasureSegment::release);
+                    lastSavedSegments = segs;
+                } else {
+                    segs.forEach(MeasureDetector.MeasureSegment::release);
+                }
+
+                lastSavedClean  = cleanFrame.clone();
+                prevSampleClean = cleanFrame.clone();
+                cleanFrame.release();
+                log(logger, "[첫 프레임] 저장 완료 (최대 마디: %d)", lastSavedMaxMeasure);
+                frameIdx++;
+                continue;
+            }
+
+            // ── diff 계산 ──────────────────────────────────────────────────
+            double diffFromSaved = diffRatio(lastSavedClean, cleanFrame);
+            double diffFromPrev  = prevSampleClean != null
+                ? diffRatio(prevSampleClean, cleanFrame) : 1.0;
+
+            log(logger, "  [DIFF] frame=%d fromSaved=%.4f fromPrev=%.4f stableCount=%d",
+                frameIdx, diffFromSaved, diffFromPrev, stableCount);
+
+            if (diffFromSaved < CHANGE_THRESHOLD) {
+                // 변화 없음
+                stableCount = 0;
+            } else {
+                // 변화 있음 → 안정화 체크
+                if (diffFromPrev < STABLE_THRESHOLD) {
+                    stableCount++;
+                    log(logger, "  [STABLE+] stableCount=%d/%d", stableCount, STABLE_COUNT_NEEDED);
+                } else {
+                    stableCount = 0;
+                    log(logger, "  [SCROLLING] 아직 움직임 중");
+                }
+
+                if (stableCount >= STABLE_COUNT_NEEDED) {
+                    // [변경] 시각적 분석을 통한 2마디 단위 추출
+                    int visualX = findVisualOverlap(lastSavedClean, cleanFrame);
+                    
+                    // 화면의 절반(약 2마디) 이상이 새로운 내용일 때만 캡처
+                    if (visualX != -1 && visualX < roiRect.width * 0.6) {
+                        int barX = findBarLine(frame, roiRect, visualX);
+                        int cropX = (barX != -1) ? barX : visualX;
+
+                        // 정확히 2마디 분량만 자르기 (화면 절반 정도를 목표로)
+                        Rect captureRect = new Rect(roiRect.x + cropX, roiRect.y, 
+                                                   Math.min(roiRect.width - cropX, roiRect.width / 2), roiRect.height);
+                        
+                        Path p = saveRoi(frame, captureRect, outDir, saved.size());
+                        saved.add(p);
+                        measuresCaptured += 2;
+                        log(logger, "  [2마디 추출] %s (누적: %d/%d)", p.getFileName(), measuresCaptured, totalMeasures);
+
+                        lastSavedClean.release();
+                        lastSavedClean = cleanFrame.clone();
+                        
+                        if (totalMeasures > 0 && measuresCaptured >= totalMeasures) {
+                            log(logger, "[목표 도달] 설정한 마디 수(%d)를 모두 추출했습니다.", totalMeasures);
+                            break; 
+                        }
+                    }
+                    stableCount = 0;
+                }
+            }
+
+            if (prevSampleClean != null) prevSampleClean.release();
+            prevSampleClean = cleanFrame;
+
+            // 진행 로그
+            if (frameIdx % (long)(fps * 10) == 0 && frameIdx > 0) {
+                double pct   = (double) frameIdx / totalFrames * 100;
+                long elapsed = (System.currentTimeMillis() - startMs) / 1000;
+                log(logger, "  진행: %.0f%% (%d초 경과, 캡처: %d장)", pct, elapsed, saved.size());
+            }
+
+            frameIdx++;
+        }
+
+        // 정리
+        if (lastSavedClean  != null) lastSavedClean.release();
+        if (prevSampleClean != null) prevSampleClean.release();
+        if (lastSavedSegments != null)
+            lastSavedSegments.forEach(MeasureDetector.MeasureSegment::release);
+        frame.release();
+        cap.release();
+
+        log(logger, "[완료] 총 %d장 캡처됨", saved.size());
+        return saved;
+    }
+
+    // ── 유틸 ─────────────────────────────────────────────────────────────────
+
+    /**
+     * 이전 프레임(oldImg)의 오른쪽 끝 부분이 현재 프레임(newImg)의 어디에 있는지 찾아
+     * 중복되는 지점(X 좌표)을 반환합니다.
+     */
+    private int findVisualOverlap(Mat oldImg, Mat newImg) {
+        if (oldImg == null || newImg == null) return -1;
+        int w = oldImg.cols();
+        int h = oldImg.rows();
+        
+        // 이전 프레임의 오른쪽 끝 100픽셀을 템플릿으로 사용
+        int stripW = Math.min(100, w / 4);
+        if (w <= stripW + 20) return -1;
+        Mat strip = new Mat(oldImg, new Rect(w - stripW - 10, 0, stripW, h));
+        
+        Mat result = new Mat();
+        Imgproc.matchTemplate(newImg, strip, result, Imgproc.TM_CCOEFF_NORMED);
+        Core.MinMaxLocResult mmr = Core.minMaxLoc(result);
+        
+        strip.release();
+        result.release();
+
+        // 유사도가 80% 이상인 지점을 찾으면 해당 지점까지를 중복으로 간주 (+10 마진 제거로 더 정확하게)
+        if (mmr.maxVal > 0.8) {
+            return (int) mmr.maxLoc.x + stripW;
+        }
+        return -1;
+    }
+
+    /**
+     * 특정 X 좌표 근처에서 실제 악보의 세로선(Bar line)을 찾습니다.
+     */
+    private int findBarLine(Mat frame, Rect roiRect, int targetX) {
+        try {
+            Mat roi = new Mat(frame, roiRect);
+            Mat gray = new Mat();
+            Imgproc.cvtColor(roi, gray, Imgproc.COLOR_BGR2GRAY);
+            Imgproc.threshold(gray, gray, 0, 255, Imgproc.THRESH_BINARY_INV | Imgproc.THRESH_OTSU);
+
+            int range = 60; // 탐색 범위 확대
+            int startX = Math.max(0, targetX - range);
+            int endX = Math.min(gray.cols() - 1, targetX + range);
+
+            int bestX = -1;
+            double maxVerticality = 0;
+
+            for (int x = endX; x >= startX; x--) { // 마디 번호와 가까운 쪽(오른쪽)부터 탐색
+                int blackPixels = 0;
+                for (int y = 0; y < gray.rows(); y++) {
+                    if (gray.get(y, x)[0] > 0) blackPixels++;
+                }
+                // 수직으로 꽉 찬 선일수록 세로줄일 확률이 높음
+                double verticality = (double) blackPixels / gray.rows();
+                if (verticality > 0.7 && verticality > maxVerticality) {
+                    maxVerticality = verticality;
+                    bestX = x;
+                }
+            }
+            gray.release();
+            roi.release();
+            return bestX;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private Mat preprocess(Mat src) {
+        Mat gray = new Mat();
+        Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
+        Imgproc.threshold(gray, gray, 200, 255, Imgproc.THRESH_BINARY);
+
+        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
+        Mat opened = new Mat();
+        Imgproc.morphologyEx(gray, opened, Imgproc.MORPH_OPEN, kernel);
+        gray.release(); kernel.release();
+        return opened;
+    }
+
+    private double diffRatio(Mat a, Mat b) {
+        Mat diff = new Mat();
+        Core.absdiff(a, b, diff);
+        Imgproc.threshold(diff, diff, DIFF_BINARIZE, 255, Imgproc.THRESH_BINARY);
+        int changed = Core.countNonZero(diff);
+        diff.release();
+        return (double) changed / (a.cols() * a.rows());
+    }
+
+    private Path saveRoi(Mat frame, Rect cropRect, Path outDir, int index) throws Exception {
+        int fw = frame.cols(), fh = frame.rows();
+        boolean valid = cropRect.width > 0 && cropRect.height > 0
+            && cropRect.x >= 0 && cropRect.y >= 0
+            && cropRect.x + cropRect.width  <= fw
+            && cropRect.y + cropRect.height <= fh;
+        Rect safe = valid ? cropRect : new Rect(0, 0, fw, fh);
+        Mat  out  = new Mat(frame, safe);
+        Path path = outDir.resolve(String.format("frame_%04d.jpg", index));
+        Imgcodecs.imwrite(path.toString(), out);
+        out.release();
+        return path;
+    }
+
+    private Rect makeRoiRect(int w, int h) {
+        int y1 = clamp((int)(h * roi.topRatio()),    0, h - 1);
+        int y2 = clamp((int)(h * roi.bottomRatio()), y1 + 1, h);
+        int x1 = clamp((int)(w * roi.leftRatio()),   0, w - 1);
+        int x2 = clamp((int)(w * roi.rightRatio()),  x1 + 1, w);
+        return new Rect(x1, y1, x2 - x1, y2 - y1);
+    }
+
+    private static int clamp(int v, int min, int max) { return Math.max(min, Math.min(max, v)); }
+
+    public static BufferedImage captureFrame(Path videoPath, double positionRatio, RoiConfig roi) throws Exception {
+        VideoCapture cap = new VideoCapture(videoPath.toString());
+        if (!cap.isOpened()) throw new IllegalStateException("영상 열기 실패: " + videoPath);
+        try {
+            int w = (int) cap.get(Videoio.CAP_PROP_FRAME_WIDTH);
+            int h = (int) cap.get(Videoio.CAP_PROP_FRAME_HEIGHT);
+            double total = cap.get(Videoio.CAP_PROP_FRAME_COUNT);
+            cap.set(Videoio.CAP_PROP_POS_FRAMES, Math.max(0, Math.min(total - 1, total * positionRatio)));
+            Mat frame = new Mat();
+            if (!cap.read(frame) || frame.empty()) throw new IllegalStateException("프레임 읽기 실패");
+            int y1 = clamp((int)(h * roi.topRatio()),    0, h - 1);
+            int y2 = clamp((int)(h * roi.bottomRatio()), y1 + 1, h);
+            int x1 = clamp((int)(w * roi.leftRatio()),   0, w - 1);
+            int x2 = clamp((int)(w * roi.rightRatio()),  x1 + 1, w);
+            Mat r = new Mat(frame, new Rect(x1, y1, x2 - x1, y2 - y1));
+            MatOfByte buf = new MatOfByte();
+            Imgcodecs.imencode(".png", r, buf);
+            BufferedImage img;
+            try (ByteArrayInputStream in = new ByteArrayInputStream(buf.toArray())) {
+                img = ImageIO.read(in);
+            }
+            r.release(); frame.release();
+            return img;
+        } finally { cap.release(); }
+    }
+
+    private static void log(ProgressLogger logger, String fmt, Object... args) {
+        String msg = String.format(fmt, args);
+        if (logger != null) logger.log(msg); else System.out.println(msg);
+    }
+}

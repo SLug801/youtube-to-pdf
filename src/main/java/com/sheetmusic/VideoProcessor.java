@@ -1,50 +1,129 @@
 package com.sheetmusic;
 
-import java.nio.file.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 public class VideoProcessor {
 
+    /** CLI용 */
+    public static String process(
+            String url,
+            String title,
+            FrameExtractor.RoiConfig roi
+    ) throws Exception {
+        String safeTitle = sanitizeTitle(title);
+        Path workDir   = Path.of(safeTitle);
+        Path framesDir = workDir.resolve(Config.FRAMES_DIR);
+        Path pdfPath   = workDir.resolve(safeTitle + ".pdf");
+
+        Files.createDirectories(workDir);
+
+        Path videoFile = YtDlpDownloader.download(url, workDir);
+        List<Path> frames = new FrameExtractor(roi).extract(videoFile, framesDir);
+        PdfBuilder.build(frames, pdfPath);
+
+        Files.deleteIfExists(videoFile);
+        System.out.println("[정리] 영상 파일 삭제됨 → 결과물: " + workDir + "/");
+        return pdfPath.toString();
+    }
+
+    /** GUI용 (logger + SwingWorker 취소 지원) */
+    public static String process(
+            String url,
+            String title,
+            Path outputPdf,
+            FrameExtractor.RoiConfig roi,
+            ProgressLogger logger,
+            javax.swing.SwingWorker<?, ?> worker
+    ) throws Exception {
+        return process(url, title, outputPdf, roi, logger, worker, null, SheetMode.TRANSLUCENT);
+    }
+
     /**
-     * URL 하나를 처리해서 PDF로 저장. PDF 경로 반환.
+     * GUI용. {@code preDownloadedVideo}가 주어지고 존재하면 다운로드를 건너뛰고 재사용한다.
      */
     public static String process(
             String url,
             String title,
-            double threshold,
-            FrameExtractor.RoiConfig roi
+            Path outputPdf,
+            FrameExtractor.RoiConfig roi,
+            ProgressLogger logger,
+            javax.swing.SwingWorker<?, ?> worker,
+            Path preDownloadedVideo,
+            SheetMode mode
     ) throws Exception {
+        if (logger == null) logger = ProgressLogger.console();
 
-        // 작업 폴더 생성
-        String safeTitle = title.replaceAll("[^a-zA-Z0-9가-힣_\\- ]", "").trim();
-        if (safeTitle.length() > 50) safeTitle = safeTitle.substring(0, 50);
+        Path parent = outputPdf.getParent();
+        if (parent != null) Files.createDirectories(parent);
 
-        Path workDir  = Path.of(safeTitle);
+        Path workDir   = Files.createTempDirectory("ytpdf-work-");
         Path framesDir = workDir.resolve(Config.FRAMES_DIR);
-        Path pdfPath  = workDir.resolve(safeTitle + ".pdf");
-        Path videoTemplate = workDir.resolve("video.%(ext)s");
+        final ProgressLogger log = logger;
 
-        Files.createDirectories(workDir);
+        boolean reused = preDownloadedVideo != null && Files.exists(preDownloadedVideo);
 
-        // 1. 다운로드
-        Path videoFile = YtDlpDownloader.download(url, workDir);
+        try {
+            checkCancellation(worker);
+            log.log("[작업] 임시 디렉터리: " + workDir);
 
-        // 2. ROI 기반 프레임 추출
-        FrameExtractor extractor = new FrameExtractor(threshold, roi);
-        List<Path> frames = extractor.extract(videoFile, framesDir);
+            Path videoFile;
+            if (reused) {
+                log.log("[캐시] 기존 다운로드 영상 재사용: " + preDownloadedVideo.getFileName());
+                videoFile = preDownloadedVideo;
+            } else {
+                log.log("[캐시] 재사용 불가 → 새 다운로드");
+                videoFile = YtDlpDownloader.download(url, workDir, log);
+            }
+            checkCancellation(worker);
 
-        // 3. PDF 생성
-        PdfBuilder.build(frames, pdfPath);
+            List<Path> frames = new FrameExtractor(roi, mode).extract(videoFile, framesDir, log);
+            checkCancellation(worker);
 
-        // 4. 영상 파일 삭제 (용량 절약, 원하지 않으면 이 줄 주석 처리)
-        Files.deleteIfExists(videoFile);
-        System.out.println("[정리] 영상 파일 삭제됨 → 결과물: " + workDir + "/");
+            if (frames.isEmpty()) {
+                log.log("[경고] 캡처된 프레임이 없습니다. ROI 설정을 확인하세요.");
+                return null;
+            }
 
-        return pdfPath.toString();
+            log.log("[PDF 생성] " + frames.size() + "장 변환 중...");
+            PdfBuilder.build(frames, outputPdf, log, (current, total) ->
+                log.log(String.format("[PDF] %.0f%% (%d/%d)", (double) current / total * 100, current, total)));
+
+            // 재사용 파일은 호출자(GUI 캐시)가 관리하므로 삭제하지 않음
+            if (!reused) Files.deleteIfExists(videoFile);
+            log.log("[완료] 결과물: " + outputPdf);
+            return outputPdf.toString();
+
+        } catch (InterruptedException | java.util.concurrent.CancellationException e) {
+            log.log("[중단] 사용자가 작업을 취소했습니다.");
+            return null;
+        } finally {
+            deleteDirectory(workDir);   // 재사용 영상은 다른 폴더이므로 영향 없음
+        }
     }
 
-    // threshold만 받는 오버로드 (기본 ROI 사용)
-    public static String process(String url, String title, double threshold) throws Exception {
-        return process(url, title, threshold, FrameExtractor.RoiConfig.defaultConfig());
+    private static String sanitizeTitle(String title) {
+        String safe = title.replaceAll("[^a-zA-Z0-9가-힣_\\- ]", "").trim();
+        return safe.length() > 50 ? safe.substring(0, 50) : safe;
+    }
+
+    private static void checkCancellation(javax.swing.SwingWorker<?, ?> worker)
+            throws InterruptedException {
+        if (worker != null && worker.isCancelled())
+            throw new InterruptedException("작업이 중단되었습니다.");
+        if (Thread.currentThread().isInterrupted())
+            throw new InterruptedException("스레드가 인터럽트되었습니다.");
+    }
+
+    private static void deleteDirectory(Path root) {
+        if (root == null || !Files.exists(root)) return;
+        try (Stream<Path> stream = Files.walk(root)) {
+            stream.sorted(Comparator.reverseOrder())
+                  .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
+        } catch (IOException ignored) {}
     }
 }

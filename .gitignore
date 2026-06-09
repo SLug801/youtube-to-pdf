@@ -1,28 +1,10 @@
-# Maven
-/target/
-**/target/
-/.mvn
-.mvn/
-
-# Java
+target/
+sheet_*/
+ocr_debug_*.png
 *.class
-*.jar
-*.war
-*.ear
-
-# IDE
-*.iml
-*.idea/
-.vscode/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# yt-dlp and generated artifacts
-**/captured_frames/
-**/*.mp4
-**/*.mkv
-**/*.webm
-**/video.*
-**/*.pdf
+# 중첩된 중복 복사본(자체 .git 보유) — 빌드는 루트 src/ 사용
+youtube-to-pdf/
+.vscode/
