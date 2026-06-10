@@ -37,12 +37,18 @@ jpackage ^
   --dest "%OUT%"
 if errorlevel 1 goto :fail
 
-echo [4/4] Cleaning up staging...
+echo [4/5] Bundling docs (license + read-me) into the distribution...
+REM  *.txt grabs THIRD-PARTY-LICENSES.txt and the Korean read-me (avoids non-ASCII in this script)
+copy /y "*.txt" "%OUT%\youtube-to-pdf\" >nul
+copy /y "LICENSE" "%OUT%\youtube-to-pdf\LICENSE.txt" >nul
+
+echo [5/5] Cleaning up staging...
 rmdir /s /q "%STAGE%"
 
 echo.
 echo DONE.
 echo   App : %OUT%\youtube-to-pdf\youtube-to-pdf.exe
+echo   Docs: LICENSE.txt, THIRD-PARTY-LICENSES.txt, and the Korean read-me are included.
 echo   Share: zip the folder  %OUT%\youtube-to-pdf  and send it.
 echo          Recipient unzips and double-clicks youtube-to-pdf.exe (no install).
 goto :eof
