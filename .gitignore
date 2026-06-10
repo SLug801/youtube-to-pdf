@@ -1,4 +1,6 @@
 target/
+dist/
+dist-input/
 sheet_*/
 ocr_debug_*.png
 *.class

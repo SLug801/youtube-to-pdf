@@ -7,11 +7,57 @@ import java.nio.file.Path;
 public class YtDlpDownloader {
 
     /**
+     * 실행에 사용할 yt-dlp 실행파일 경로를 찾는다.
+     * 배포본(jpackage app-image)에서는 PATH에 yt-dlp가 없으므로, 앱과 함께 동봉한
+     * yt-dlp.exe를 우선 찾는다. 탐색 순서:
+     *   1) 시스템 속성 -Dytpdf.ytdlp=경로
+     *   2) 실행 중인 jar/앱과 같은 폴더의 yt-dlp(.exe) (배포본: app\yt-dlp.exe)
+     *   3) 현재 작업 폴더의 yt-dlp.exe (개발 중 리포 루트)
+     *   4) PATH 의 yt-dlp (직접 설치한 경우)
+     */
+    private static volatile String ytDlpCmd;
+
+    static String ytDlp() {
+        if (ytDlpCmd != null) return ytDlpCmd;
+        ytDlpCmd = resolveYtDlp();
+        return ytDlpCmd;
+    }
+
+    private static String resolveYtDlp() {
+        // 1) 명시적 지정
+        String prop = System.getProperty("ytpdf.ytdlp");
+        if (prop != null && Files.isRegularFile(Path.of(prop))) return prop;
+
+        // 2) 실행 jar/앱과 같은 폴더 (그리고 한 단계 위)
+        try {
+            Path code = Path.of(YtDlpDownloader.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI());
+            Path dir = Files.isRegularFile(code) ? code.getParent() : code;
+            for (Path base : new Path[]{ dir, dir != null ? dir.getParent() : null }) {
+                if (base == null) continue;
+                for (String name : new String[]{ "yt-dlp.exe", "yt-dlp" }) {
+                    Path cand = base.resolve(name);
+                    if (Files.isRegularFile(cand)) return cand.toString();
+                }
+            }
+        } catch (Exception ignored) { }
+
+        // 3) 현재 작업 폴더
+        for (String name : new String[]{ "yt-dlp.exe", "yt-dlp" }) {
+            Path cand = Path.of(name).toAbsolutePath();
+            if (Files.isRegularFile(cand)) return cand.toString();
+        }
+
+        // 4) PATH 폴백
+        return "yt-dlp";
+    }
+
+    /**
      * yt-dlp가 설치되어 있는지 확인. 없으면 안내 후 종료.
      */
     public static void checkYtDlp() {
         try {
-            ProcessBuilder pb = new ProcessBuilder("yt-dlp", "--version");
+            ProcessBuilder pb = new ProcessBuilder(ytDlp(), "--version");
             pb.redirectErrorStream(true);
             Process p = pb.start();
             String version = new String(p.getInputStream().readAllBytes()).trim();
@@ -60,7 +106,7 @@ public class YtDlpDownloader {
         // bestvideo: 단일 비디오 스트림 (ffmpeg merge 불필요, 1080p H.264 우선)
         // 22/18: 폴백 (오디오 포함 progressive, 720p/360p)
         ProcessBuilder pb = new ProcessBuilder(
-                "yt-dlp",
+                ytDlp(),
                 "-f", "bestvideo[vcodec^=avc][height<=1080]/bestvideo[height<=1080]/22/18/best",
                 "-o", outputTemplate.toString(),
                 "--no-playlist",
