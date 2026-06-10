@@ -97,36 +97,6 @@ public class FrameExtractor {
     private static final int     NOISE_MIN_AREA   = 8;    // 이보다 작은 고립 덩어리(연결요소) 삭제.
                                                           //   면적 기준이라 긴 오선·기둥·숫자는 보존, 점 잡티만 제거.
 
-    // ── 투명(TRANSPARENT) 모드 파라미터 ──────────────────────────────────────
-    // 표기 극성: +1=밝은(흰) 표기만(tophat), -1=어두운(검정) 표기만(blackhat), 0=둘 다(max).
-    // 표기가 흰색이면 +1로 둬야 어두운 배경(픽업·그림자)이 안 새어든다. 둘 다(0)는 배경 누출↑.
-    private static final int     TRANSPARENT_POLARITY = +1;
-    private static final int     TRANSPARENT_KERNEL  = 5;    // tophat/blackhat 커널. 작을수록 '가는 표기'만
-                                                             //   남고 배경의 두꺼운 구조(연주자·악기)는 빠진다.
-                                                             //   표기가 굵어 속이 비면 ↑, 배경이 새면 ↓.
-    private static final double  TRANSPARENT_BOOST   = 1.5;  // 표기 대비 강화 배율(8U 포화). 배경이 같이
-                                                             //   진해지면 ↓, 표기가 너무 옅으면 ↑.
-    private static final int     TRANSPARENT_FILL    = 5;    // 출력에서 두꺼운 표기 '속 채우기' 닫힘 커널.
-                                                             //   박자 빔·굵은 숫자 속이 비면 ↑(빔 두께만큼),
-                                                             //   표기가 뭉개지면 ↓(0이면 끔). 검출엔 영향 없음.
-    private static final boolean TRANSPARENT_BINARIZE = true; // 출력을 흑/백 이진화(흐린 회색 얼룩 제거→또렷).
-    private static final int     TRANSPARENT_BIN_THRESH = 60;  // 0=Otsu 자동, >0=고정 임계(배경이 새면 30~60으로).
-    // 강/약 임계 혼합(hysteresis): 강 임계로 '확실한 표기'를 잡고, 약 임계로 옅은 표기까지 본 뒤,
-    // 약한 것 중 '강한 표기에 연결된 것만' 살린다 → 옅은 (5)는 살리고 외딴 배경 잡티는 버림.
-    // 켜면 위 BIN_THRESH(단일 임계) 대신 아래 강/약 임계를 쓴다.
-    private static final boolean TRANSPARENT_HYSTERESIS = true;
-    private static final int     TRANSPARENT_T_HIGH = 55;  // 강 임계(확실한 표기). 배경 새면 ↑.
-    private static final int     TRANSPARENT_T_LOW  = 20;  // 약 임계(옅은 (5) 포함). '(5)' 안 나오면 ↓, 배경 새면 ↑.
-    // 큰 '솔리드 덩어리'(연주자·악기 누출) 제거: 면적이 크고 꽉 찬(채움밀도 높은) 덩어리만 삭제.
-    // 표기는 가는 획(채움밀도 낮음)이라 보존된다. 단, 덩어리가 표기와 붙으면 같이 지워질 수 있음.
-    private static final boolean TRANSPARENT_DEBLOB    = true;
-    private static final int     TRANSPARENT_BLOB_AREA = 4000;   // 이 픽셀수 이상이고
-    private static final double  TRANSPARENT_BLOB_DENS = 0.35;   // 채움밀도(면적/박스) 이 이상이면 덩어리로 보고 삭제
-    private static final boolean TRANSPARENT_DESAT    = true; // 컬러 배경(높은 채도) 억제 on/off.
-    private static final int     TRANSPARENT_SAT_MAX  = 60;   // (0~255) 이 채도 초과 화소는 컬러 배경으로
-                                                             //   보고 표기에서 제외. 컬러 배경이 새면 ↓,
-                                                             //   표기가 옅은 색이라 지워지면 ↑.
-
     public record RoiConfig(
             double topRatio, double bottomRatio,
             double leftRatio, double rightRatio) {
@@ -396,9 +366,8 @@ public class FrameExtractor {
      * 배경 잡음이 훨씬 적음, 실측 검증됨). 가로 오선은 제거해 세로 특징 위주로 남긴다.
      */
     private Mat featureImage(Mat roiColor) {
-        if (mode == SheetMode.TRANSPARENT) return featureImageTransparent(roiColor);
         if (mode == SheetMode.OPAQUE)      return featureImageOpaque(roiColor);
-        // ── 이하 반투명(TRANSLUCENT) 기존 로직 (그대로 보존) ──
+        // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
         Mat gray = new Mat();
         Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
         // 어두운 패널이면 반전 → 표기를 항상 "밝은 배경 위 어두운 선"으로 정규화
@@ -458,9 +427,8 @@ public class FrameExtractor {
      * 매칭용 featureImage와 달리 가로 오선은 보존한다(악보의 일부).
      */
     private Mat cleanForOutput(Mat panoBGR) {
-        if (mode == SheetMode.TRANSPARENT) return cleanForOutputTransparent(panoBGR);
         if (mode == SheetMode.OPAQUE)      return cleanForOutputOpaque(panoBGR);
-        // ── 이하 반투명(TRANSLUCENT) 기존 로직 (그대로 보존) ──
+        // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
         Mat gray = new Mat();
         Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
         if (Core.mean(gray).val[0] < 100) Core.bitwise_not(gray, gray);
@@ -585,118 +553,6 @@ public class FrameExtractor {
         labels.release(); stats.release();
     }
 
-    /**
-     * 이력(hysteresis) 이중 임계. marks(밝을수록 표기)에서
-     *  - 강 임계(tHigh) 이상 = '확실한 표기'
-     *  - 약 임계(tLow) 이상 = '후보'(옅은 표기 + 배경 잡음)
-     * 후보 연결요소 중 '확실한 표기'를 하나라도 포함한 것만 살린다.
-     * → 옅어도 진짜 표기(강한 표기와 연결)는 보존, 외딴 배경 잡티는 제거.
-     */
-    /**
-     * 이진 영상에서 '크고 꽉 찬 덩어리'(연주자·악기 누출)를 제거한다.
-     * 면적 ≥ minArea 이고 채움밀도(면적/바운딩박스) ≥ minDensity 인 연결요소만 삭제.
-     * 표기(가는 획·숫자)는 채움밀도가 낮아 보존된다.
-     */
-    private void removeLargeBlobs(Mat bin, int minArea, double minDensity) {
-        Mat labels = new Mat(), stats = new Mat(), cent = new Mat();
-        int n = Imgproc.connectedComponentsWithStats(bin, labels, stats, cent, 8, CvType.CV_32S);
-        cent.release();
-        if (n <= 1) { labels.release(); stats.release(); return; }
-
-        boolean[] drop = new boolean[n];
-        for (int i = 1; i < n; i++) {
-            double area = stats.get(i, Imgproc.CC_STAT_AREA)[0];
-            double w    = stats.get(i, Imgproc.CC_STAT_WIDTH)[0];
-            double h    = stats.get(i, Imgproc.CC_STAT_HEIGHT)[0];
-            double dens = area / Math.max(1.0, w * h);
-            if (area >= minArea && dens >= minDensity) drop[i] = true;
-        }
-        int total = (int) labels.total();
-        int[]  lab  = new int[total]; labels.get(0, 0, lab);
-        byte[] data = new byte[total]; bin.get(0, 0, data);
-        for (int p = 0; p < total; p++) if (drop[lab[p]]) data[p] = 0;
-        bin.put(0, 0, data);
-        labels.release(); stats.release();
-    }
-
-    private Mat hysteresis(Mat marks, int tLow, int tHigh) {
-        Mat weak = new Mat(), strong = new Mat();
-        Imgproc.threshold(marks, weak,   tLow,  255, Imgproc.THRESH_BINARY);
-        Imgproc.threshold(marks, strong, tHigh, 255, Imgproc.THRESH_BINARY);
-
-        Mat labels = new Mat(), stats = new Mat(), cent = new Mat();
-        int n = Imgproc.connectedComponentsWithStats(weak, labels, stats, cent, 8, CvType.CV_32S);
-        stats.release(); cent.release(); weak.release();
-
-        Mat res = Mat.zeros(marks.size(), CvType.CV_8U);
-        if (n > 1) {
-            int total = (int) labels.total();
-            int[]  lab = new int[total];  labels.get(0, 0, lab);
-            byte[] str = new byte[total]; strong.get(0, 0, str);
-            boolean[] keep = new boolean[n];               // 강한 표기를 포함한 라벨 표시
-            for (int p = 0; p < total; p++)
-                if (str[p] != 0 && lab[p] > 0) keep[lab[p]] = true;
-            byte[] out = new byte[total];
-            for (int p = 0; p < total; p++)
-                if (keep[lab[p]]) out[p] = (byte) 0xFF;
-            res.put(0, 0, out);
-        }
-        labels.release(); strong.release();
-        return res;
-    }
-
-    // ── 투명(TRANSPARENT) 모드 전용 ───────────────────────────────────────────
-    // 패널 없이 영상 위에 악보가 직접 올라가고, 표기 색이 흰색일 수도(밝은 표기) 검정일 수도
-    // (어두운 표기) 있다. tophat=밝은 가는 구조, blackhat=어두운 가는 구조를 각각 뽑아 합치면,
-    // 표기 색 극성과 무관하게 표기만 남기고 완만한 배경은 억제된다.
-
-    /**
-     * 투명 모드 표기 강도 맵(밝을수록 표기). 색 극성·컬러 배경에 강인하게:
-     *  - tophat(밝은 가는 구조)+blackhat(어두운 가는 구조)의 max → 흰/검 표기 모두 추출, 완만한 배경 억제
-     *  - (옵션) 채도 높은 화소 억제 → 컬러 영상 배경(악기·커튼·진행바) 제거. 무채색 표기는 보존.
-     */
-    private Mat transparentMarks(Mat colorSrc, boolean clahe) {
-        Mat gray = new Mat();
-        Imgproc.cvtColor(colorSrc, gray, Imgproc.COLOR_BGR2GRAY);
-        if (clahe) {
-            Mat eq = new Mat();
-            Imgproc.createCLAHE(2.0, new Size(8, 8)).apply(gray, eq);
-            gray.release(); gray = eq;
-        }
-
-        int ks = Math.max(3, TRANSPARENT_KERNEL);
-        Mat k  = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(ks, ks));
-        Mat marks = new Mat();
-        if (TRANSPARENT_POLARITY > 0) {
-            Imgproc.morphologyEx(gray, marks, Imgproc.MORPH_TOPHAT, k);    // 밝은(흰) 표기만
-        } else if (TRANSPARENT_POLARITY < 0) {
-            Imgproc.morphologyEx(gray, marks, Imgproc.MORPH_BLACKHAT, k);  // 어두운(검정) 표기만
-        } else {
-            Mat top = new Mat(), bot = new Mat();
-            Imgproc.morphologyEx(gray, top, Imgproc.MORPH_TOPHAT,   k);
-            Imgproc.morphologyEx(gray, bot, Imgproc.MORPH_BLACKHAT, k);
-            Core.max(top, bot, marks);                                    // 둘 다(극성 모를 때)
-            top.release(); bot.release();
-        }
-        k.release(); gray.release();
-
-        if (TRANSPARENT_DESAT) {                                      // 컬러 배경(높은 채도) 억제
-            Mat hsv = new Mat();
-            Imgproc.cvtColor(colorSrc, hsv, Imgproc.COLOR_BGR2HSV);
-            java.util.List<Mat> ch = new java.util.ArrayList<>();
-            Core.split(hsv, ch);
-            Mat lowSat = new Mat();
-            Imgproc.threshold(ch.get(1), lowSat, TRANSPARENT_SAT_MAX, 255, Imgproc.THRESH_BINARY_INV);
-            Core.min(marks, lowSat, marks);   // 채도 높은(=컬러) 화소를 0으로 깎음
-            hsv.release(); for (Mat c : ch) c.release(); lowSat.release();
-        }
-        return marks;
-    }
-
-    // [테스트 전용] 단일 프레임 디버그 훅 — TransparentTest에서 호출. 앱 동작과 무관.
-    public Mat debugTransparentOutput(Mat colorFrame)  { return cleanForOutputTransparent(colorFrame); }
-    public Mat debugTransparentFeature(Mat colorFrame) { return featureImageTransparent(colorFrame); }
-
     // [테스트 전용] 불투명 모드 디버그 훅 — OpaqueFrameTest에서 호출. 앱 동작과 무관.
     public Mat debugOpaqueOutput(Mat colorFrame)  { return cleanForOutputOpaque(colorFrame); }
     public Mat debugOpaqueFeature(Mat colorFrame) { return featureImageOpaque(colorFrame); }
@@ -713,62 +569,6 @@ public class FrameExtractor {
             if (f == null) throw new IllegalStateException("프레임 읽기 실패 @" + positionRatio);
             return frameToMat(f, new Java2DFrameConverter());
         }
-    }
-
-    /** 투명 모드 매칭용 특징(밝은/어두운 표기 모두, 세로 획 위주). */
-    private Mat featureImageTransparent(Mat roiColor) {
-        Mat marks = transparentMarks(roiColor, false);
-
-        Mat bin = new Mat();
-        Imgproc.threshold(marks, bin, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
-        marks.release();
-
-        // 긴 가로 오선 제거(매칭은 세로 획이 핵심) — 반투명과 동일
-        int kw = Math.max(15, bin.cols() / 3);
-        Mat hk    = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kw, 1));
-        Mat lines = new Mat();
-        Imgproc.morphologyEx(bin, lines, Imgproc.MORPH_OPEN, hk);
-        Core.subtract(bin, lines, bin);
-        hk.release(); lines.release();
-        return bin;
-    }
-
-    /** 투명 모드 출력 정리: 밝은/어두운 표기를 모두 흰 종이+검은 표기로. */
-    private Mat cleanForOutputTransparent(Mat panoBGR) {
-        Mat marks = transparentMarks(panoBGR, true);                  // CLAHE 대비 보정 포함
-
-        Core.multiply(marks, new Scalar(TRANSPARENT_BOOST), marks);   // 옅은 표기 대비 강화
-
-        if (TRANSPARENT_BINARIZE) {                                   // 흑/백 이진화(흐린 회색 얼룩 제거)
-            if (TRANSPARENT_HYSTERESIS) {
-                Mat hyst = hysteresis(marks, TRANSPARENT_T_LOW, TRANSPARENT_T_HIGH);
-                marks.release(); marks = hyst;                       // 강/약 임계 혼합(연결된 약한 표기만)
-            } else if (TRANSPARENT_BIN_THRESH > 0) {
-                Imgproc.threshold(marks, marks, TRANSPARENT_BIN_THRESH, 255, Imgproc.THRESH_BINARY);
-            } else {
-                Imgproc.threshold(marks, marks, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
-            }
-        }
-
-        if (TRANSPARENT_DEBLOB)                                       // 큰 솔리드 덩어리(연주자·악기) 제거
-            removeLargeBlobs(marks, TRANSPARENT_BLOB_AREA, TRANSPARENT_BLOB_DENS);
-
-        if (TRANSPARENT_FILL >= 2) {                                  // 두꺼운 표기 속 채우기(닫힘)
-            Mat fk = Imgproc.getStructuringElement(
-                Imgproc.MORPH_RECT, new Size(TRANSPARENT_FILL, TRANSPARENT_FILL));
-            Imgproc.morphologyEx(marks, marks, Imgproc.MORPH_CLOSE, fk);
-            fk.release();
-        }
-        if (DENOISE_OUTPUT) denoiseMarks(marks);                      // 배경 텍스처·점 잡티 제거
-
-        Mat inv = new Mat();
-        Core.bitwise_not(marks, inv);                                 // 흰 배경 + 검은 표기
-        marks.release();
-
-        Mat out = new Mat();
-        Imgproc.cvtColor(inv, out, Imgproc.COLOR_GRAY2BGR);
-        inv.release();
-        return out;
     }
 
     // ── 유틸 ─────────────────────────────────────────────────────────────────
