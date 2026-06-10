@@ -4,6 +4,7 @@ import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -28,6 +29,7 @@ import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFileChooser;
 import javax.swing.JToggleButton;
 import javax.swing.JFrame;
@@ -59,6 +61,7 @@ public class GuiApp {
     private CropPreviewPanel cropPreviewPanel;
     private JTextArea logArea;
     private JLabel timerLabel;
+    private JCheckBox openFolderCheckbox;
     private javax.swing.Timer elapsedTimer;
     private long conversionStartMs;
     private FrameExtractor.RoiConfig currentRoi = FrameExtractor.RoiConfig.defaultConfig();
@@ -170,25 +173,27 @@ public class GuiApp {
         panel.add(new JLabel("악보 배경 모드:"), gbc);
 
         JToggleButton modeTranslucent = new JToggleButton(SheetMode.TRANSLUCENT.label, true);
-        JToggleButton modeTransparent = new JToggleButton(SheetMode.TRANSPARENT.label);
         JToggleButton modeOpaque      = new JToggleButton(SheetMode.OPAQUE.label);
-        modeOpaque.setEnabled(false);                 // 불투명 모드는 준비 중
-        modeOpaque.setToolTipText("준비 중");
+        modeTranslucent.setToolTipText("반투명 패널 위 악보(뮤비/연주 배경이 옅게 비침). 연속 스크롤 영상.");
+        modeOpaque.setToolTipText("흰 배경 + 검정 악보(스캔/PDF형, 페이지 넘김 영상 포함). 가장 깨끗하게 변환됨");
 
         ButtonGroup modeGroup = new ButtonGroup();
         modeGroup.add(modeTranslucent);
-        modeGroup.add(modeTransparent);
         modeGroup.add(modeOpaque);
         modeTranslucent.addActionListener(e -> currentMode = SheetMode.TRANSLUCENT);
-        modeTransparent.addActionListener(e -> currentMode = SheetMode.TRANSPARENT);
         modeOpaque.addActionListener(e -> currentMode = SheetMode.OPAQUE);
 
-        JPanel modeRow = new JPanel(new GridLayout(1, 3, 6, 0));
+        JPanel modeRow = new JPanel(new GridLayout(1, 2, 6, 0));
         modeRow.add(modeTranslucent);
-        modeRow.add(modeTransparent);
         modeRow.add(modeOpaque);
         gbc.gridy = row++;
         panel.add(modeRow, gbc);
+
+        // 완료되면 결과 폴더 열기
+        openFolderCheckbox = new JCheckBox("완료되면 폴더 열기", true);
+        openFolderCheckbox.setToolTipText("변환이 끝나면 PDF가 저장된 폴더를 자동으로 엽니다.");
+        gbc.gridy = row++;
+        panel.add(openFolderCheckbox, gbc);
 
         statusLabel = new JLabel("준비 완료");
         statusLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
@@ -383,8 +388,11 @@ public class GuiApp {
             protected void done() {
                 try {
                     if (!isCancelled()) {
-                        appendLog("변환 완료: " + get());
+                        String result = get();
+                        appendLog("변환 완료: " + result);
                         statusLabel.setText("완료");
+                        if (result != null && openFolderCheckbox.isSelected())
+                            openContainingFolder(result);
                     } else {
                         appendLog("변환이 취소되었습니다.");
                         statusLabel.setText("취소됨");
@@ -412,6 +420,21 @@ public class GuiApp {
                 statusLabel.setText("실시간 캡처 중: " + Paths.get(pathStr).getFileName());
             } catch (IOException ignored) {}
         });
+    }
+
+    /** 변환 완료된 PDF가 들어 있는 폴더를 파일 탐색기로 연다(실패해도 변환 결과엔 영향 없음). */
+    private void openContainingFolder(String pdfPath) {
+        try {
+            Path dir = Paths.get(pdfPath).toAbsolutePath().getParent();
+            if (dir == null) return;
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+                Desktop.getDesktop().open(dir.toFile());
+            } else {
+                appendLog("[안내] 폴더 자동 열기를 지원하지 않는 환경입니다: " + dir);
+            }
+        } catch (Exception e) {
+            appendLog("[안내] 폴더 열기 실패: " + e.getMessage());
+        }
     }
 
     private void cancelConversion() {
