@@ -1,4 +1,9 @@
-package com.sheetmusic;
+package com.sheetmusic.app;
+
+import com.sheetmusic.download.YtDlpDownloader;
+import com.sheetmusic.pipeline.VideoProcessor;
+import com.sheetmusic.vision.FrameExtractor;
+import com.sheetmusic.vision.SheetMode;
 
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;

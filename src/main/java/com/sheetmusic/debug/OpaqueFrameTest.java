@@ -1,4 +1,7 @@
-package com.sheetmusic;
+package com.sheetmusic.debug;
+
+import com.sheetmusic.vision.FrameExtractor;
+import com.sheetmusic.vision.SheetMode;
 
 import org.bytedeco.javacpp.Loader;
 import org.bytedeco.opencv.opencv_java;

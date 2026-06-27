@@ -1,4 +1,6 @@
-package com.sheetmusic;
+package com.sheetmusic.vision;
+
+import com.sheetmusic.common.ProgressLogger;
 
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;

@@ -30,7 +30,7 @@ jpackage ^
   --name youtube-to-pdf ^
   --input "%STAGE%" ^
   --main-jar %JAR% ^
-  --main-class com.sheetmusic.Main ^
+  --main-class com.sheetmusic.app.Main ^
   --java-options "-Dfile.encoding=UTF-8" ^
   --java-options "-Djna.nosys=true" ^
   --java-options "-Djna.protected=true" ^

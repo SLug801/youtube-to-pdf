@@ -1,4 +1,4 @@
-package com.sheetmusic;
+package com.sheetmusic.vision;
 
 /**
  * 악보 영상의 배경 유형. 모드에 따라 매칭용 특징 추출(featureImage)과
