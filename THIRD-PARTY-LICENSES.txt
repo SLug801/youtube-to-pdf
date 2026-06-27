@@ -1,0 +1,61 @@
+THIRD-PARTY LICENSES / 제3자 구성요소 라이선스 고지
+============================================================
+
+이 프로그램(및 jpackage로 만든 배포본)은 아래 오픈소스 구성요소를 포함하거나
+사용합니다. 각 구성요소는 해당 라이선스의 조건에 따라 배포됩니다.
+배포 시 이 파일을 함께 동봉하세요.
+
+This software (and its packaged distribution) includes or uses the
+third-party components listed below. Each is distributed under its own
+license. Keep this file together with any redistribution.
+
+------------------------------------------------------------
+1. Java Runtime (OpenJDK) — jpackage로 동봉된 런타임
+   License: GNU General Public License v2 with the Classpath Exception (GPLv2+CE)
+   https://openjdk.org/legal/gplv2+ce.html
+   비고: Classpath Exception 덕분에 애플리케이션은 별도 라이선스를 유지할 수 있습니다.
+
+2. FFmpeg (org.bytedeco:ffmpeg 6.0-1.5.9, JavaCPP preset 바이너리)
+   License: GNU LGPL v2.1 or later (일부 빌드/구성요소는 GPL v2+ 일 수 있음)
+   https://ffmpeg.org/legal.html
+   Source: https://ffmpeg.org/  /  https://github.com/bytedeco/javacpp-presets
+   비고: 동봉된 FFmpeg 바이너리의 정확한 빌드 옵션(LGPL/GPL)은 JavaCPP Presets
+        배포본에서 확인하세요. 재배포 시 FFmpeg의 저작권·라이선스 고지를 보존해야
+        하며, GPL 구성요소가 포함된 경우 소스 제공 의무가 발생할 수 있습니다.
+
+3. OpenCV (org.bytedeco:opencv 4.7.0-1.5.9)
+   License: Apache License 2.0
+   https://github.com/opencv/opencv/blob/4.x/LICENSE
+
+4. OpenBLAS (org.bytedeco:openblas 0.3.23-1.5.9)
+   License: BSD 3-Clause
+   https://github.com/OpenMathLib/OpenBLAS/blob/develop/LICENSE
+
+5. JavaCV / JavaCPP 및 Presets (org.bytedeco:javacv 1.5.9 등)
+   License: Apache License 2.0
+   https://github.com/bytedeco/javacv/blob/master/LICENSE.txt
+
+6. Apache PDFBox + FontBox (org.apache.pdfbox:pdfbox 3.0.2)
+   License: Apache License 2.0
+   https://pdfbox.apache.org/
+
+7. Tess4J / Tesseract OCR + 의존(JNA, Leptonica), tessdata(eng)
+   (net.sourceforge.tess4j:tess4j 5.4.0 — 실험적/현재 메인 파이프라인 미사용이나
+    의존성에 포함됨)
+   License: Apache License 2.0 (Tess4J, Tesseract, tessdata)
+            JNA: Apache 2.0 또는 LGPL 2.1 (듀얼)
+            Leptonica: BSD 2-Clause 계열
+   https://github.com/nguyenq/tess4j
+
+8. yt-dlp (yt-dlp.exe 동봉)
+   License: The Unlicense (퍼블릭 도메인)
+   https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE
+   비고: 퍼블릭 도메인이라 자유롭게 재배포 가능. 다만 yt-dlp의 사용은 대상
+        플랫폼(YouTube 등)의 이용약관 준수 여부와 별개임에 유의.
+
+------------------------------------------------------------
+Apache License 2.0 전문: http://www.apache.org/licenses/LICENSE-2.0
+BSD / LGPL / GPL 전문은 각 프로젝트 링크를 참조하세요.
+
+각 라이선스의 저작권 고지와 라이선스 텍스트는 위 구성요소의 배포본/소스에
+포함되어 있으며, 재배포 시 함께 보존되어야 합니다.
