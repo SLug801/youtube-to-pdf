@@ -141,15 +141,27 @@ java -jar target\youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
 
 ```
 com/sheetmusic/
-├─ Main.java            진입점(CLI/GUI 분기)
-├─ GuiApp.java          Swing GUI (프리뷰·ROI·모드·타이머·폴더열기)
-├─ VideoProcessor.java  파이프라인 오케스트레이션
-├─ YtDlpDownloader.java yt-dlp 래퍼
-├─ FrameExtractor.java  핵심: 프레임 정렬·병합·배경 제거 (모드별 분기)
-├─ SheetMode.java       반투명 / 불투명 enum
-├─ PdfBuilder.java      PDFBox 출력
-├─ Config.java          상수
-└─ *Test.java           단일 프레임/로컬 영상 튜닝용 개발 도구
+├─ app/
+│  ├─ Main.java            진입점(CLI/GUI 분기)
+│  └─ GuiApp.java          Swing GUI (프리뷰·ROI·모드·타이머·폴더열기)
+│     ├─ PreviewPanel.java     드래그 조절 ROI 박스 프리뷰
+│     └─ CropPreviewPanel.java 캡처 영역 미리보기
+├─ pipeline/
+│  └─ VideoProcessor.java  파이프라인 오케스트레이션
+├─ download/
+│  └─ YtDlpDownloader.java yt-dlp 래퍼
+├─ vision/
+│  ├─ FrameExtractor.java  핵심: 프레임 정렬·병합 (모드별 스티칭)
+│  ├─ SheetImageOps.java   배경 제거·이진화·노이즈 제거 (Mat 연산)
+│  ├─ ScanParams.java      스캔/스티칭 튜닝 상수
+│  └─ SheetMode.java       반투명 / 불투명 enum
+├─ pdf/
+│  └─ PdfBuilder.java      PDFBox 출력
+├─ common/
+│  ├─ Config.java          상수
+│  └─ ProgressLogger.java  진행 로그 인터페이스
+└─ debug/
+   └─ *Test.java           단일 프레임/로컬 영상 튜닝용 개발 도구
 ```
 
 ---
