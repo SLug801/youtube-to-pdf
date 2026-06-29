@@ -1,4 +1,6 @@
 target/
+build/
+.gradle/
 dist/
 dist-input/
 sheet_*/

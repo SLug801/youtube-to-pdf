@@ -5,6 +5,8 @@ import com.sheetmusic.pipeline.VideoProcessor;
 import com.sheetmusic.vision.FrameExtractor;
 import com.sheetmusic.vision.SheetMode;
 
+import com.formdev.flatlaf.FlatLightLaf;
+
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Desktop;
@@ -69,7 +71,12 @@ public class GuiApp {
     private String cachedUrl    = null;
 
     public static void show() {
-        SwingUtilities.invokeLater(() -> new GuiApp().createAndShowGui());
+        SwingUtilities.invokeLater(() -> {
+            try {
+                FlatLightLaf.setup();   // 모던 플랫 테마(OS 무관). 실패해도 기본 LaF로 계속 진행.
+            } catch (Throwable ignored) { }
+            new GuiApp().createAndShowGui();
+        });
     }
 
     private void createAndShowGui() {
