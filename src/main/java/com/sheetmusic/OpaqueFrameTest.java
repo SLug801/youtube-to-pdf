@@ -32,8 +32,7 @@ public class OpaqueFrameTest {
             ? parsePositions(args)
             : new double[]{0.2, 0.4, 0.6, 0.8};
 
-        FrameExtractor fx = new FrameExtractor(
-            FrameExtractor.RoiConfig.defaultConfig(), SheetMode.OPAQUE);
+        SheetImageOps ops = new SheetImageOps(SheetMode.OPAQUE);
 
         for (double p : pos) {
             Mat full = FrameExtractor.captureFrameMat(Path.of(video), p);
@@ -42,8 +41,8 @@ public class OpaqueFrameTest {
             int y1 = (int) (h * BAND_BOTTOM);
             Mat band = new Mat(full, new Rect(0, y0, w, y1 - y0));
 
-            Mat out  = fx.debugOpaqueOutput(band);
-            Mat feat = fx.debugOpaqueFeature(band);
+            Mat out  = ops.cleanForOutput(band);
+            Mat feat = ops.featureImage(band);
 
             String tag = String.format("optest_p%02d", (int) Math.round(p * 100));
             Imgcodecs.imwrite(tag + "_raw.png",  band);

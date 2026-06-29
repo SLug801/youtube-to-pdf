@@ -1,0 +1,74 @@
+import org.gradle.internal.os.OperatingSystem
+
+plugins {
+    id 'application'
+    // fat(shadow) jar — 기존 maven-shade-plugin 대체. Gradle 8.x 호환 유지보수판.
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group   = 'com.sheetmusic'
+version = '1.0.0'
+
+// JDK 21 toolchain — 설치돼 있지 않으면 Gradle이 자동 프로비저닝(OS 무관 빌드).
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// ── 빌드 호스트의 OS/아키텍처를 자동 감지해 bytedeco 네이티브 classifier 선택 ──
+//   (기존 pom 의 windows-x86_64 하드코딩 제거 → Windows/macOS/Linux 어디서 빌드해도 그 OS용 jar 생성)
+def os   = OperatingSystem.current()
+def arch = System.getProperty('os.arch').toLowerCase()
+def isArm = arch in ['aarch64', 'arm64']
+def javacppPlatform
+if (os.windows) {
+    javacppPlatform = 'windows-x86_64'
+} else if (os.macOsX) {
+    javacppPlatform = isArm ? 'macosx-arm64' : 'macosx-x86_64'
+} else {                       // Linux 등
+    javacppPlatform = isArm ? 'linux-arm64' : 'linux-x86_64'
+}
+logger.lifecycle "[ytpdf] javacpp.platform = ${javacppPlatform} (os=${os.name}, arch=${arch})"
+
+ext.javacvVersion = '1.5.9'
+
+dependencies {
+    // PDF 생성
+    implementation 'org.apache.pdfbox:pdfbox:3.0.2'
+
+    // 영상 디코딩 + 영상 처리 (javacv-platform 대신 필요한 모듈만, 현재 OS 네이티브만)
+    implementation "org.bytedeco:javacv:${javacvVersion}"
+    implementation "org.bytedeco:opencv:4.7.0-${javacvVersion}:${javacppPlatform}"
+    implementation "org.bytedeco:openblas:0.3.23-${javacvVersion}:${javacppPlatform}"
+    implementation "org.bytedeco:ffmpeg:6.0-${javacvVersion}:${javacppPlatform}"
+
+    // 모던 Swing 테마(Look & Feel)
+    implementation 'com.formdev:flatlaf:3.5.4'
+}
+
+application {
+    mainClass = 'com.sheetmusic.Main'
+    // 기존 run.bat 과 동일한 JVM 옵션
+    applicationDefaultJvmArgs = [
+        '-Djna.nosys=true',
+        '-Djna.protected=true',
+        '-Dfile.encoding=UTF-8'
+    ]
+}
+
+// 결과 jar 이름을 기존과 맞춤: build/libs/youtube-to-pdf-1.0.0-shaded.jar
+tasks.named('shadowJar') {
+    archiveClassifier = 'shaded'
+    // JNI 서명 충돌 방지(기존 shade filter 와 동일)
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+}
+
+// ── 모든 OS에서 도는 "단일 배포 jar"가 필요하면(선택) ─────────────────────────
+//   위 classifier 의존성 대신 아래처럼 javacv-platform 으로 바꾸면 전 플랫폼 네이티브가
+//   한 jar 에 모두 들어감(대신 수백 MB로 커지고 빌드가 느려짐).
+//     implementation "org.bytedeco:javacv-platform:${javacvVersion}"

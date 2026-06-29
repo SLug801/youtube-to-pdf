@@ -22,9 +22,7 @@ import org.opencv.core.Mat;
 import org.opencv.core.MatOfByte;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
-import org.opencv.core.Size;
 import org.opencv.imgcodecs.Imgcodecs;
-import org.opencv.imgproc.Imgproc;
 
 /**
  * 가로로 스크롤되는 TAB 악보 영상을 한 장의 긴 파노라마로 재구성한 뒤
@@ -42,8 +40,9 @@ import org.opencv.imgproc.Imgproc;
  *  - 겹침이 거의 없어 매칭이 실패하면 곧바로 버리지 않는다(누락 방지): 직전 샘플과 동일한
  *    "정지된 새 화면"으로 확인될 때만 화면 전체를 새 페이지로 이어붙인다. 전환/블러 프레임은
  *    안정될 때까지 보류한다.
- *  - 특징(featureImage)은 adaptiveThreshold로 표기만 추출 → 움직이는 반투명 배경을 억제하고
- *    가로 오선·잡티를 제거해 세로 획(마디선·숫자·기둥) 위주로 남겨 매칭 신뢰도를 높인다.
+ *
+ * 픽셀 연산(특징 추출·이진화·매칭·출력 정리·노이즈 제거)은 {@link SheetImageOps}로 분리했고,
+ * 이 클래스는 프레임 샘플링과 누적 스티칭 상태 전이(스크롤/페이지/정지 판정)만 담당한다.
  */
 public class FrameExtractor {
 
@@ -84,6 +83,16 @@ public class FrameExtractor {
                                                         //   지터성 미세 중복을 차단(FPS↑로 스텝이 작아져 4 유지).
     private static final double CONTENT_MIN  = 0.004;   // 인트로(빈 화면) 판별 임계
 
+    // 페이지 스냅샷(불투명): 확정 페이지와의 dx=0 상관이 SAME_PAGE 미만이면 '전환됨',
+    // 직전 프레임과의 상관이 STABLE_PAGE 이상이면 '안정(전환 끝남)'으로 보고 새 행을 붙인다.
+    // simConf 이중분포: ~0.70은 같은 페이지에서 재생 하이라이트/플레이헤드만 이동, ~0.50은 진짜 플립.
+    // 둘 사이(0.62)로 갈라 하이라이트 이동은 무시하고 실제 페이지 전환만 새 행으로 커밋한다.
+    private static final double OPAQUE_SAME_PAGE   = 0.62; // 이 미만이면 확정 페이지와 다른 페이지(플립)
+    private static final double OPAQUE_STABLE_PAGE = 0.90; // 이 이상이면 직전과 같아 안정(미안정 전환 배제)
+    // [A안] 새 페이지를 통째 붙이기 전, 확정 페이지와 겹친 만큼만 잘라 중복을 없앤다.
+    //   누락이 더 치명적이므로 반투명(MIN_SCORE 0.40)보다 빡빡하게 — "확실할 때만" trim, 아니면 통째.
+    private static final double OPAQUE_TRIM_SCORE  = 0.60; // 겹침 신뢰 임계(이 미만이면 못 믿어 통째 붙임)
+
     // [테스트] 영상의 [시작초, 끝초] 구간만 처리(빠른 실영상 확인용). 둘 다 0이면 전체.
     // 예: 2분대 장면 보려면 START=110, END=150.
     private static final double TEST_START_SECONDS = 0;
@@ -95,13 +104,6 @@ public class FrameExtractor {
     // 두 밴드가 서로 다른 오프셋에 꽂혀 불일치 → 거부(중복 append 차단).
     private static final double SECOND_BAND_RATIO = 0.30; // 둘째 밴드를 떼는 위치(ROI 폭 대비)
     private static final int    DX_AGREE_TOL      = 6;    // 두 밴드 dx 허용 오차(px) — 이내면 일치로 봄
-
-    // ── 최종 출력 배경 노이즈 제거 ───────────────────────────────────────────
-    private static final boolean DENOISE_OUTPUT  = true;  // 최종 결과물 노이즈 한 번 더 거르기 on/off
-    private static final int     NOISE_FLOOR      = 45;   // (0~255) 대비 부스트 후 이 밝기 미만은
-                                                          //   배경 텍스처로 보고 제거. 높일수록 더 빡세게.
-    private static final int     NOISE_MIN_AREA   = 8;    // 이보다 작은 고립 덩어리(연결요소) 삭제.
-                                                          //   면적 기준이라 긴 오선·기둥·숫자는 보존, 점 잡티만 제거.
 
     public record RoiConfig(
             double topRatio, double bottomRatio,
@@ -127,6 +129,7 @@ public class FrameExtractor {
 
     private final RoiConfig roi;
     private final SheetMode mode;
+    private final SheetImageOps ops;
 
     public FrameExtractor(RoiConfig roi) {
         this(roi, SheetMode.TRANSLUCENT);
@@ -135,6 +138,7 @@ public class FrameExtractor {
     public FrameExtractor(RoiConfig roi, SheetMode mode) {
         this.roi  = roi;
         this.mode = (mode != null) ? mode : SheetMode.TRANSLUCENT;
+        this.ops  = new SheetImageOps(this.mode);
     }
 
     public List<Path> extract(Path videoPath, Path outDir) throws Exception {
@@ -211,7 +215,7 @@ public class FrameExtractor {
 
                 Mat roiColor = new Mat(frame, roiRect).clone();
                 frame.release();
-                Mat feat = featureImage(roiColor);
+                Mat feat = ops.featureImage(roiColor);
 
                 if (!started) {
                     double cr = (double) Core.countNonZero(feat) / feat.total();
@@ -239,8 +243,8 @@ public class FrameExtractor {
                     // 서브마디 정합(dx 측정)은 마디 주기성에 속아 누락/중복이 난다(실측 확인).
                     // 대신 "확정 페이지와 충분히 달라지고(전환) + 직전 프레임과 같아짐(안정)"이면
                     // 새 페이지를 통째로 한 행으로 붙인다 — 경계의 얇은 슬리버만 겹치고 누락은 없다.
-                    double simConf = matchOffset(comFeat,  feat, tw, TPL_INSET)[2]; // 확정페이지와 dx=0 상관
-                    double simLast = matchOffset(lastFeat, feat, tw, TPL_INSET)[2]; // 직전프레임과 dx=0 상관
+                    double simConf = ops.matchOffset(comFeat,  feat, tw, TPL_INSET)[2]; // 확정페이지와 dx=0 상관
+                    double simLast = ops.matchOffset(lastFeat, feat, tw, TPL_INSET)[2]; // 직전프레임과 dx=0 상관
                     lastDx = 0; lastScore = simConf;
                     boolean changed = simConf < OPAQUE_SAME_PAGE;    // 확정 페이지와 달라짐 = 전환됨
                     boolean stable  = simLast >= OPAQUE_STABLE_PAGE; // 직전과 동일 = 전환 끝나 안정
@@ -248,7 +252,7 @@ public class FrameExtractor {
                     if (changed && stable) {
                         // 새 페이지 확정. 기본은 통째 붙이기(누락 0). 단, 확정 페이지와의 겹침이
                         // "확실"할 때만 겹친 만큼 잘라 중복을 없앤다(애매하면 통째 = 중복 감수).
-                        double[] m  = matchOffset(comFeat, feat, tw, TPL_INSET);
+                        double[] m  = ops.matchOffset(comFeat, feat, tw, TPL_INSET);
                         int    dx   = (int) m[0];
                         double sc   = m[1];
                         double mg   = sc - m[2];   // peak − zero: 겹침 위치가 정지 위치보다 더 잘 맞는 정도
@@ -260,7 +264,7 @@ public class FrameExtractor {
                              && sc >= OPAQUE_TRIM_SCORE && mg >= MARGIN;
                         // 2-밴드 합의: 다른 위치 밴드도 같은 dx여야 진짜 겹침(마디 주기 오매칭 차단)
                         if (trustOverlap && dx <= reach2) {
-                            double[] m2 = matchOffset(comFeat, feat, tw, secondInset);
+                            double[] m2 = ops.matchOffset(comFeat, feat, tw, secondInset);
                             if (m2[1] >= OPAQUE_TRIM_SCORE && Math.abs(dx - (int) m2[0]) > DX_AGREE_TOL)
                                 trustOverlap = false;
                         }
@@ -286,7 +290,7 @@ public class FrameExtractor {
                     }
                 } else {
                     // ── 반투명/투명: 연속 스크롤 누적(확정화면 comFeat 대비 dx 측정) ──
-                    double[] m    = matchOffset(comFeat, feat, tw, TPL_INSET);
+                    double[] m    = ops.matchOffset(comFeat, feat, tw, TPL_INSET);
                     int    dx     = (int) m[0];
                     double score  = m[1];          // 최적 위치(dx) 상관
                     double zero   = m[2];          // dx=0(제로 시프트) 상관
@@ -300,7 +304,7 @@ public class FrameExtractor {
                     // 2-밴드 합의: 다른 위치 밴드로도 같은 dx가 나와야 진짜 스크롤로 인정(주기 오매칭 차단).
                     boolean isScroll = baseScroll;
                     if (baseScroll && dx <= reach2) {
-                        double[] m2 = matchOffset(comFeat, feat, tw, secondInset);
+                        double[] m2 = ops.matchOffset(comFeat, feat, tw, secondInset);
                         boolean confidentDisagree = m2[1] >= MIN_SCORE
                                                  && Math.abs(dx - (int) m2[0]) > DX_AGREE_TOL;
                         if (confidentDisagree) { isScroll = false; rejectCnt++; }
@@ -322,11 +326,11 @@ public class FrameExtractor {
                         staticCnt++;
                     } else if (score < NEWPAGE_MAX_SCORE) {
                         // 확정 화면과 겹침을 못 찾음 → 완전히 새 화면일 수 있음(누락 방지).
-                        double[] s = matchOffset(lastFeat, feat, tw, TPL_INSET);
+                        double[] s = ops.matchOffset(lastFeat, feat, tw, TPL_INSET);
                         if (s[2] >= STABLE_SCORE) {     // 직전 샘플과 dx=0에서 일치 = 정지된 새 화면
                             // 반복 패턴이면 feature 매칭이 실패한 것일 수 있다. raw 회색조로 확정 화면과
                             // 겹침을 재확인 → 확실하면 그만큼만 잘라 중복 제거(누락 안전: 애매하면 통째).
-                            double[] g = matchOffsetGray(comColor, roiColor, tw, TPL_INSET);
+                            double[] g = ops.matchOffsetGray(comColor, roiColor, tw, TPL_INSET);
                             int    gdx = (int) g[0];
                             double gsc = g[1];
                             if (gsc >= NEWPAGE_OVERLAP_SCORE && gdx >= 0 && gdx <= roiW - tw) {
@@ -391,7 +395,7 @@ public class FrameExtractor {
                 saved = sliceAndSave(panorama, roiW, outDir, logger);
                 panorama.release();
             } else {
-                Mat cleaned = cleanForOutput(panorama);   // 반투명: 배경 제거 → 흰 종이+검은 표기
+                Mat cleaned = ops.cleanForOutput(panorama);   // 반투명: 배경 제거 → 흰 종이+검은 표기
                 panorama.release();
                 saved = sliceAndSave(cleaned, roiW, outDir, logger);
                 cleaned.release();
@@ -399,82 +403,6 @@ public class FrameExtractor {
             log(logger, "[완료] 총 %d줄 생성", saved.size());
             return saved;
         }
-    }
-
-    /**
-     * 기준 화면(ref) 안에서 현재 프레임(cur)의 왼쪽 밴드를 찾아 우측 이동량 dx와 신뢰도를 반환한다.
-     * 템플릿을 cur의 왼쪽(inset)에서 떼고 ref 전체를 탐색하므로, 화면 폭에 가까운 큰 점프
-     * 스크롤까지 측정 가능하다(슬릿스캔의 폭 한계 없음). 단, 검출 가능한 최소 겹침은 템플릿 폭(tw).
-     *
-     * @return {dx, peakScore, zeroScore}. dx ≥ 0 이면 cur이 ref보다 오른쪽으로 dx만큼 이동(스크롤).
-     *         zeroScore는 dx=0(제로 시프트)에서의 상관 — 높으면 화면이 안 움직인 것(정지).
-     */
-    private double[] matchOffset(Mat ref, Mat cur, int tw, int inset) {
-        int h  = cur.rows();
-        int cw = cur.cols();
-        int tx = clamp(inset, 0, Math.max(0, cw - tw));
-        Mat tpl = new Mat(cur, new Rect(tx, 0, tw, h));
-        Mat res = new Mat();
-        Imgproc.matchTemplate(ref, tpl, res, Imgproc.TM_CCOEFF_NORMED);
-        Core.MinMaxLocResult mmr = Core.minMaxLoc(res);
-        double zero = res.get(0, tx)[0];     // loc=tx ↔ dx=0
-        tpl.release(); res.release();
-        return new double[]{ (int) mmr.maxLoc.x - tx, mmr.maxVal, zero };
-    }
-
-    /**
-     * matchOffset의 raw 회색조 버전. featureImage(세로획)가 반복 패턴(트레몰로 등)에서 저변동으로
-     * 무력화될 때, 오선·숫자 구조가 살아 있는 원본 회색조로 겹침을 더 안정적으로 잰다.
-     * @return {dx, peakScore, zeroScore}
-     */
-    private double[] matchOffsetGray(Mat refColor, Mat curColor, int tw, int inset) {
-        Mat rg = new Mat(), cg = new Mat();
-        Imgproc.cvtColor(refColor, rg, Imgproc.COLOR_BGR2GRAY);
-        Imgproc.cvtColor(curColor, cg, Imgproc.COLOR_BGR2GRAY);
-        int h  = cg.rows();
-        int cw = cg.cols();
-        int tx = clamp(inset, 0, Math.max(0, cw - tw));
-        Mat tpl = new Mat(cg, new Rect(tx, 0, tw, h));
-        Mat res = new Mat();
-        Imgproc.matchTemplate(rg, tpl, res, Imgproc.TM_CCOEFF_NORMED);
-        Core.MinMaxLocResult mmr = Core.minMaxLoc(res);
-        double zero = res.get(0, tx)[0];
-        rg.release(); cg.release(); tpl.release(); res.release();
-        return new double[]{ (int) mmr.maxLoc.x - tx, mmr.maxVal, zero };
-    }
-
-    /**
-     * 매칭/콘텐츠 판별용 특징 이미지.
-     * 모폴로지 블랙햇으로 "(반투명) 패널 위 어두운 표기(숫자·마디선·기둥)"만 추출한다.
-     * 블랙햇은 국소 대비 기반이라 전역 밝기/투명도에 무관 — 반투명이 강하거나(흐림),
-     * 패널 없이 투명하거나, 너무 밝은 경우까지 표기를 안정적으로 살린다(adaptiveThreshold보다
-     * 배경 잡음이 훨씬 적음, 실측 검증됨). 가로 오선은 제거해 세로 특징 위주로 남긴다.
-     */
-    private Mat featureImage(Mat roiColor) {
-        if (mode == SheetMode.OPAQUE)      return featureImageOpaque(roiColor);
-        // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
-        Mat gray = new Mat();
-        Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
-        // 어두운 패널이면 반전 → 표기를 항상 "밝은 배경 위 어두운 선"으로 정규화
-        if (Core.mean(gray).val[0] < 100) Core.bitwise_not(gray, gray);
-
-        Mat k  = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
-        Mat bh = new Mat();
-        Imgproc.morphologyEx(gray, bh, Imgproc.MORPH_BLACKHAT, k);
-        k.release(); gray.release();
-
-        Mat bin = new Mat();
-        Imgproc.threshold(bh, bin, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
-        bh.release();
-
-        // 긴 가로 오선 제거(매칭은 세로 획이 핵심)
-        int kw = Math.max(15, bin.cols() / 3);
-        Mat hk    = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kw, 1));
-        Mat lines = new Mat();
-        Imgproc.morphologyEx(bin, lines, Imgproc.MORPH_OPEN, hk);
-        Core.subtract(bin, lines, bin);
-        hk.release(); lines.release();
-        return bin;
     }
 
     /** 파노라마를 chunkW 단위로 잘라 PDF용 이미지로 저장. 마지막 좁은 조각은 흰 여백으로 패딩. */
@@ -505,145 +433,6 @@ public class FrameExtractor {
         }
         return saved;
     }
-
-    /**
-     * 출력용 배경 제거: 블랙햇으로 어두운 표기(오선 포함)만 추출해 "흰 종이 + 검은 표기"로 만든다.
-     * 반투명 배경(뮤비/연주자)·과밝은 패널을 전역 밝기와 무관하게 제거한다(실측 검증됨).
-     * 매칭용 featureImage와 달리 가로 오선은 보존한다(악보의 일부).
-     */
-    private Mat cleanForOutput(Mat panoBGR) {
-        if (mode == SheetMode.OPAQUE)      return cleanForOutputOpaque(panoBGR);
-        // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
-        Mat gray = new Mat();
-        Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
-        if (Core.mean(gray).val[0] < 100) Core.bitwise_not(gray, gray);
-
-        // 대비 보정(CLAHE): fade-in 등으로 흐린 구간의 표기도 출력에서 살린다.
-        Mat eq = new Mat();
-        Imgproc.createCLAHE(2.0, new Size(8, 8)).apply(gray, eq);
-        gray.release();
-
-        Mat k  = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
-        Mat bh = new Mat();
-        Imgproc.morphologyEx(eq, bh, Imgproc.MORPH_BLACKHAT, k);
-        k.release(); eq.release();
-
-        Core.multiply(bh, new Scalar(3.0), bh);          // 옅은 표기 대비 강화(8U 포화)
-        if (DENOISE_OUTPUT) denoiseMarks(bh);            // 배경 텍스처·점 잡티 한 번 더 제거
-        Mat inv = new Mat();
-        Core.bitwise_not(bh, inv);                        // 255-bh → 흰 배경 + 검은 표기
-        bh.release();
-
-        Mat out = new Mat();
-        Imgproc.cvtColor(inv, out, Imgproc.COLOR_GRAY2BGR);
-        inv.release();
-        return out;
-    }
-
-    // ── 불투명(OPAQUE) 모드 ──────────────────────────────────────────────────
-    // 흰 배경 + 검정 악보(이미 깨끗한 스캔/PDF형). 단순 이진화로 또렷하게 만든다.
-    // 반투명/투명과 달리 배경 억제용 모폴로지가 거의 필요 없다.
-    private static final int OPAQUE_BLOCK = 31;   // adaptiveThreshold 블록 크기(홀수). 클수록 큰 음영에 둔감.
-    private static final int OPAQUE_C     = 12;   // 국소 배경 대비 잉크 판정 여유. 클수록 옅은 회색·잡티 덜 잡힘.
-    // 페이지 스냅샷(불투명): 확정 페이지와의 dx=0 상관이 SAME_PAGE 미만이면 '전환됨',
-    // 직전 프레임과의 상관이 STABLE_PAGE 이상이면 '안정(전환 끝남)'으로 보고 새 행을 붙인다.
-    // simConf 이중분포: ~0.70은 같은 페이지에서 재생 하이라이트/플레이헤드만 이동, ~0.50은 진짜 플립.
-    // 둘 사이(0.62)로 갈라 하이라이트 이동은 무시하고 실제 페이지 전환만 새 행으로 커밋한다.
-    private static final double OPAQUE_SAME_PAGE   = 0.62; // 이 미만이면 확정 페이지와 다른 페이지(플립)
-    private static final double OPAQUE_STABLE_PAGE = 0.90; // 이 이상이면 직전과 같아 안정(미안정 전환 배제)
-    // [A안] 새 페이지를 통째 붙이기 전, 확정 페이지와 겹친 만큼만 잘라 중복을 없앤다.
-    //   누락이 더 치명적이므로 반투명(MIN_SCORE 0.40)보다 빡빡하게 — "확실할 때만" trim, 아니면 통째.
-    private static final double OPAQUE_TRIM_SCORE  = 0.60; // 겹침 신뢰 임계(이 미만이면 못 믿어 통째 붙임)
-
-    /**
-     * 흰 배경 + 검정 악보를 "표기=흰(255) / 배경=검(0)" 이진 마스크로 만든다.
-     * 평균 밝기가 낮으면(검은 배경에 흰 악보) 자동 반전해 항상 동일 극성으로 정규화.
-     *
-     * 전역 Otsu는 가장 진한 음표만 남기고 더 옅은 회색 오선·TAB 프렛 숫자를 버린다.
-     * 그래서 adaptiveThreshold를 써 "국소 종이 배경보다 OPAQUE_C 이상 어두우면 잉크"로 판정 →
-     * 진한 음표와 옅은 회색 숫자·오선을 모두 살린다. 재생위치 하이라이트(옅은 노랑/형광)는
-     * 종이와 밝기 차가 작아 마킹되지 않는다.
-     */
-    private Mat binarizeOpaque(Mat colorSrc) {
-        Mat gray = new Mat();
-        Imgproc.cvtColor(colorSrc, gray, Imgproc.COLOR_BGR2GRAY);
-        if (Core.mean(gray).val[0] < 110) Core.bitwise_not(gray, gray);   // 어두운 스캔 정규화
-        Mat bin = new Mat();
-        Imgproc.adaptiveThreshold(gray, bin, 255,
-                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV,
-                OPAQUE_BLOCK, OPAQUE_C);
-        gray.release();
-        return bin;
-    }
-
-    /** 불투명 매칭 특징: 이진화 후 긴 가로 오선 제거(세로 획 위주). */
-    private Mat featureImageOpaque(Mat roiColor) {
-        Mat bin = binarizeOpaque(roiColor);
-        int kw = Math.max(15, bin.cols() / 3);
-        Mat hk    = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kw, 1));
-        Mat lines = new Mat();
-        Imgproc.morphologyEx(bin, lines, Imgproc.MORPH_OPEN, hk);
-        Core.subtract(bin, lines, bin);
-        hk.release(); lines.release();
-        return bin;
-    }
-
-    /** 불투명 출력: 이진화 → 작은 점 잡티 제거 → 반전(흰 종이+검은 표기). */
-    private Mat cleanForOutputOpaque(Mat panoBGR) {
-        Mat bin = binarizeOpaque(panoBGR);
-        if (DENOISE_OUTPUT) denoiseMarks(bin);   // 점 잡티만 제거(오선·숫자는 보존)
-        Mat inv = new Mat();
-        Core.bitwise_not(bin, inv);              // 255-bin → 흰 배경 + 검은 표기
-        bin.release();
-        Mat out = new Mat();
-        Imgproc.cvtColor(inv, out, Imgproc.COLOR_GRAY2BGR);
-        inv.release();
-        return out;
-    }
-
-    /**
-     * 출력 표기(marks: 밝을수록 표기)에서 배경 노이즈를 한 번 더 제거한다.
-     *  1) 밝기 바닥값(NOISE_FLOOR) 미만 → 0 : 반투명 배경이 옅게 비친 저대비 텍스처 제거.
-     *  2) 작은 고립 덩어리(NOISE_MIN_AREA 미만) 제거 : 점 잡티만 삭제하고, 면적이 큰
-     *     오선·기둥·숫자는 보존(median 방식과 달리 가는 선을 지우지 않음).
-     */
-    private void denoiseMarks(Mat marks) {
-        // 1) 약한 배경 텍스처 제거
-        Imgproc.threshold(marks, marks, NOISE_FLOOR, 0, Imgproc.THRESH_TOZERO);
-        if (NOISE_MIN_AREA <= 1) return;
-
-        // 2) 작은 고립 덩어리 제거(면적 기준)
-        Mat bin = new Mat();
-        Imgproc.threshold(marks, bin, 0, 255, Imgproc.THRESH_BINARY);
-        Mat labels = new Mat(), stats = new Mat(), cent = new Mat();
-        int n = Imgproc.connectedComponentsWithStats(bin, labels, stats, cent, 8, CvType.CV_32S);
-        bin.release(); cent.release();
-
-        if (n > 1) {
-            boolean[] keep = new boolean[n];          // keep[0]=배경은 false 유지
-            for (int i = 1; i < n; i++)
-                keep[i] = stats.get(i, Imgproc.CC_STAT_AREA)[0] >= NOISE_MIN_AREA;
-
-            int total = (int) labels.total();
-            int[] lab = new int[total];
-            labels.get(0, 0, lab);
-            byte[] mask = new byte[total];
-            for (int p = 0; p < total; p++)
-                if (keep[lab[p]]) mask[p] = (byte) 0xFF;
-
-            Mat keepMask = new Mat(labels.rows(), labels.cols(), CvType.CV_8U);
-            keepMask.put(0, 0, mask);
-            Mat cleaned = Mat.zeros(marks.size(), marks.type());
-            marks.copyTo(cleaned, keepMask);
-            cleaned.copyTo(marks);
-            keepMask.release(); cleaned.release();
-        }
-        labels.release(); stats.release();
-    }
-
-    // [테스트 전용] 불투명 모드 디버그 훅 — OpaqueFrameTest에서 호출. 앱 동작과 무관.
-    public Mat debugOpaqueOutput(Mat colorFrame)  { return cleanForOutputOpaque(colorFrame); }
-    public Mat debugOpaqueFeature(Mat colorFrame) { return featureImageOpaque(colorFrame); }
 
     /** [테스트 전용] 영상의 positionRatio 지점 한 프레임을 풀프레임 Mat(BGR)으로 반환. */
     public static Mat captureFrameMat(Path videoPath, double positionRatio) throws Exception {

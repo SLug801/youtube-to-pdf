@@ -94,7 +94,7 @@ PDFBox로 chunk 단위 분할해 PDF 출력
 
 ## 기술 스택
 
-- **Java 21**, Maven (shaded jar)
+- **Java 21**, Gradle (shadow jar) — macOS/Windows/Linux 빌드 자동 지원
 - **OpenCV** (org.opencv via JavaCV/bytedeco) — 템플릿 매칭, 모폴로지, 이진화, 연결요소
 - **FFmpeg** (JavaCV `FFmpegFrameGrabber`, 내장) — 프레임 디코딩
 - **Apache PDFBox** — PDF 출력
@@ -105,27 +105,43 @@ PDFBox로 chunk 단위 분할해 PDF 출력
 
 ## 빌드 & 실행
 
-> Windows + JDK 21 기준. `yt-dlp.exe`는 리포에 포함, FFmpeg는 JavaCV 내장본을 사용(별도 설치 불필요).
+> JDK 21 필요. **macOS·Windows·Linux 모두 빌드 가능** — Gradle이 빌드하는 OS에 맞는 OpenCV/FFmpeg 네이티브를 자동 선택합니다. FFmpeg는 JavaCV 내장본을 사용(별도 설치 불필요).
+>
+> `yt-dlp`는 Windows에서는 리포에 포함된 `yt-dlp.exe`를 쓰고, **macOS/Linux에서는 PATH에 설치**해야 합니다 (`brew install yt-dlp` 또는 `pip install yt-dlp`).
+
+**macOS / Linux**
+
+```bash
+# 빌드  → build/libs/youtube-to-pdf-1.0.0-shaded.jar
+./gradlew shadowJar
+
+# GUI 실행 (또는 ./gradlew run)
+./run.sh
+```
+
+**Windows**
 
 ```bat
-:: 빌드
-build.bat              ::  → target\youtube-to-pdf-1.0.0-shaded.jar
+:: 빌드  → build\libs\youtube-to-pdf-1.0.0-shaded.jar
+build.bat
 
 :: GUI 실행
 run.bat
 ```
 
-**CLI**도 지원합니다:
+> 리포에 Gradle Wrapper 실행파일(`gradlew`)이 없으면 처음 한 번 `gradle wrapper`로 생성하세요(로컬 Gradle 설치 시). VS Code/IntelliJ의 Gradle 연동이 자동 생성하기도 합니다.
 
-```bat
-:: 단일/다중 URL
-java -jar target\youtube-to-pdf-1.0.0-shaded.jar <URL> [URL2 ...]
+**CLI**도 지원합니다(빌드된 jar 직접 실행):
 
-:: URL 목록 파일
-java -jar target\youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
+```bash
+# 단일/다중 URL
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar <URL> [URL2 ...]
 
-:: ROI 지정 (top,bottom,left,right 비율)
-java -jar target\youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
+# URL 목록 파일
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
+
+# ROI 지정 (top,bottom,left,right 비율)
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
 ```
 
 ### 사용 흐름 (GUI)
@@ -141,15 +157,18 @@ java -jar target\youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
 
 ```
 com/sheetmusic/
-├─ Main.java            진입점(CLI/GUI 분기)
-├─ GuiApp.java          Swing GUI (프리뷰·ROI·모드·타이머·폴더열기)
-├─ VideoProcessor.java  파이프라인 오케스트레이션
-├─ YtDlpDownloader.java yt-dlp 래퍼
-├─ FrameExtractor.java  핵심: 프레임 정렬·병합·배경 제거 (모드별 분기)
-├─ SheetMode.java       반투명 / 불투명 enum
-├─ PdfBuilder.java      PDFBox 출력
-├─ Config.java          상수
-└─ *Test.java           단일 프레임/로컬 영상 튜닝용 개발 도구
+├─ Main.java             진입점(CLI/GUI 분기)
+├─ GuiApp.java           Swing GUI 조립(컨트롤·로그·타이머·폴더열기)
+├─ PreviewPanel.java     프리뷰 위 드래그 ROI 박스(8핸들)
+├─ CropPreviewPanel.java 캡처될 영역/실시간 결과 미리보기
+├─ VideoProcessor.java   파이프라인 오케스트레이션
+├─ YtDlpDownloader.java  yt-dlp 래퍼
+├─ FrameExtractor.java   프레임 샘플링 + 누적 스티칭(스크롤/페이지/정지 판정)
+├─ SheetImageOps.java    픽셀 연산(특징추출·이진화·매칭·배경제거·노이즈제거)
+├─ SheetMode.java        반투명 / 불투명 enum
+├─ PdfBuilder.java       PDFBox 출력
+├─ Config.java           상수
+└─ *Test.java            단일 프레임/로컬 영상 튜닝용 개발 도구
 ```
 
 ---

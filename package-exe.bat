@@ -10,13 +10,13 @@ set STAGE=dist-input
 set OUT=dist
 
 echo [1/4] Building jar...
-call mvnw.cmd -q package -DskipTests
+call gradlew.bat shadowJar
 if errorlevel 1 goto :fail
 
 echo [2/4] Staging app files (jar + yt-dlp.exe)...
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%"
-copy /y "target\%JAR%" "%STAGE%\" >nul
+copy /y "build\libs\%JAR%" "%STAGE%\" >nul
 if not exist "yt-dlp.exe" (
   echo   ERROR: yt-dlp.exe not found in project root.
   goto :fail
