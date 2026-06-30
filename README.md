@@ -5,7 +5,7 @@
 
 악보(주로 베이스/기타 TAB)가 화면 **하단 띠**에 깔린 영상이 기본 대상이며,
 변환 시 **서로 독립인 두 축**을 각각 골라 조합합니다(총 4조합).
-<img width="1532" height="1042" alt="Image" src="https://github.com/user-attachments/assets/4056b6e4-65f2-4f74-b6c1-475f379e30e0" />
+<img width="1532" height="700" alt="Image" src="https://github.com/user-attachments/assets/4056b6e4-65f2-4f74-b6c1-475f379e30e0" />
 
 
 | 축 | 선택지 | 결정 |
