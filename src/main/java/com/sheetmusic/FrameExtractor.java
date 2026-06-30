@@ -60,7 +60,7 @@ public class FrameExtractor {
                                                         //   스크롤을 작은 스텝 여러 개로 쪼개 봐서, 한 스텝에
                                                         //   들어가는 반복 패턴이 줄고 매칭 정확↑(중복·누락 동시 감소).
                                                         //   대신 처리 시간이 비례해 늘어난다.
-    private static final int    SCAN_FPS_OPAQUE = 6;    // 불투명(페이지 넘김)은 페이지가 몇 초씩 정지하므로
+    private static final int    SCAN_FPS_CUT = 6;    // 불투명(페이지 넘김)은 페이지가 몇 초씩 정지하므로
                                                         //   초당 6회만 검사해도 전환을 놓치지 않는다. 매칭 연산을
                                                         //   1/3 이하로 줄여 속도↑(2샘플=약 0.33s면 새 페이지 확정).
     private static final double TPL_RATIO    = 0.15;    // (was 0.12) 매칭 템플릿 폭(ROI 폭 대비).
@@ -125,16 +125,18 @@ public class FrameExtractor {
         }
     }
 
-    private final RoiConfig roi;
-    private final SheetMode mode;
+    private final RoiConfig  roi;
+    private final Background  bg;       // 배경 종류 → 특징 추출·출력 정리 결정
+    private final Motion      motion;   // 진행 방식 → 스티칭 전략 결정
 
     public FrameExtractor(RoiConfig roi) {
-        this(roi, SheetMode.TRANSLUCENT);
+        this(roi, Background.TRANSLUCENT, Motion.SCROLL);
     }
 
-    public FrameExtractor(RoiConfig roi, SheetMode mode) {
-        this.roi  = roi;
-        this.mode = (mode != null) ? mode : SheetMode.TRANSLUCENT;
+    public FrameExtractor(RoiConfig roi, Background bg, Motion motion) {
+        this.roi    = roi;
+        this.bg     = (bg     != null) ? bg     : Background.TRANSLUCENT;
+        this.motion = (motion != null) ? motion : Motion.SCROLL;
     }
 
     public List<Path> extract(Path videoPath, Path outDir) throws Exception {
@@ -164,14 +166,14 @@ public class FrameExtractor {
             int tw      = clamp((int)(roiW * TPL_RATIO), 8, roiW - 1);
 
             // 순차 디코딩하며 N프레임마다 한 번 검사한다(매 샘플 seek 제거 → 속도↑, 결과 동일).
-            // 불투명은 페이지가 오래 정지하므로 더 낮은 검사 FPS로 매칭 연산을 줄인다.
-            final int scanFps = (mode == SheetMode.OPAQUE) ? SCAN_FPS_OPAQUE : SCAN_FPS;
+            // 화면 전환(페이지 넘김)은 한 화면이 오래 정지하므로 더 낮은 검사 FPS로 매칭 연산을 줄인다.
+            final int scanFps = (motion == Motion.CUT) ? SCAN_FPS_CUT : SCAN_FPS;
             int frameSkip = Math.max(1, (int) Math.round((fps > 0 ? fps : scanFps) / (double) scanFps));
 
             log(logger, "[시작] 해상도=%dx%d | FPS=%.1f | 길이=%.1fs | 모드=전폭매칭(검사%dfps, %d프레임마다)",
                 width, height, fps, durationSec, scanFps, frameSkip);
-            log(logger, "[설정] 악보모드=%s | ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
-                mode.label, roi, tw, MIN_SCORE, STABLE_SCORE);
+            log(logger, "[설정] 배경=%s | 진행=%s | ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
+                bg.label, motion.label, roi, tw, MIN_SCORE, STABLE_SCORE);
 
             List<Mat> colorStrips = new ArrayList<>();
             Mat   comFeat   = null;       // 파노라마 프런티어에 해당하는 "확정 화면"의 특징(roiW 폭)
@@ -233,17 +235,17 @@ public class FrameExtractor {
                     continue;
                 }
 
-                if (mode == SheetMode.OPAQUE) {
-                    // ── 불투명: 페이지 스냅샷 ──
-                    // 페이지가 정지하다 하드컷으로 여러 마디씩 넘어가고 겹침은 얇은 슬리버뿐이라,
+                if (motion == Motion.CUT) {
+                    // ── 화면 전환: 페이지 스냅샷 ──
+                    // 한 화면이 정지하다 하드컷으로 여러 마디씩 넘어가고 겹침은 얇은 슬리버뿐이라,
                     // 서브마디 정합(dx 측정)은 마디 주기성에 속아 누락/중복이 난다(실측 확인).
                     // 대신 "확정 페이지와 충분히 달라지고(전환) + 직전 프레임과 같아짐(안정)"이면
                     // 새 페이지를 통째로 한 행으로 붙인다 — 경계의 얇은 슬리버만 겹치고 누락은 없다.
                     double simConf = matchOffset(comFeat,  feat, tw, TPL_INSET)[2]; // 확정페이지와 dx=0 상관
                     double simLast = matchOffset(lastFeat, feat, tw, TPL_INSET)[2]; // 직전프레임과 dx=0 상관
                     lastDx = 0; lastScore = simConf;
-                    boolean changed = simConf < OPAQUE_SAME_PAGE;    // 확정 페이지와 달라짐 = 전환됨
-                    boolean stable  = simLast >= OPAQUE_STABLE_PAGE; // 직전과 동일 = 전환 끝나 안정
+                    boolean changed = simConf < CUT_SAME_SCREEN;    // 확정 페이지와 달라짐 = 전환됨
+                    boolean stable  = simLast >= CUT_STABLE; // 직전과 동일 = 전환 끝나 안정
 
                     if (changed && stable) {
                         // 새 페이지 확정. 기본은 통째 붙이기(누락 0). 단, 확정 페이지와의 겹침이
@@ -257,11 +259,11 @@ public class FrameExtractor {
                         // 보수 게이트: 새 내용(dx)·겹침이 둘 다 충분 + peak 높고 유일할 때만 trim
                         boolean trustOverlap =
                                 dx >= MIN_SHIFT && dx <= roiW - tw
-                             && sc >= OPAQUE_TRIM_SCORE && mg >= MARGIN;
+                             && sc >= CUT_TRIM_SCORE && mg >= MARGIN;
                         // 2-밴드 합의: 다른 위치 밴드도 같은 dx여야 진짜 겹침(마디 주기 오매칭 차단)
                         if (trustOverlap && dx <= reach2) {
                             double[] m2 = matchOffset(comFeat, feat, tw, secondInset);
-                            if (m2[1] >= OPAQUE_TRIM_SCORE && Math.abs(dx - (int) m2[0]) > DX_AGREE_TOL)
+                            if (m2[1] >= CUT_TRIM_SCORE && Math.abs(dx - (int) m2[0]) > DX_AGREE_TOL)
                                 trustOverlap = false;
                         }
 
@@ -285,7 +287,7 @@ public class FrameExtractor {
                         staticCnt++;   // 정지 또는 전환 중(미안정)
                     }
                 } else {
-                    // ── 반투명/투명: 연속 스크롤 누적(확정화면 comFeat 대비 dx 측정) ──
+                    // ── 스크롤: 연속 누적(확정화면 comFeat 대비 dx 측정) ──
                     double[] m    = matchOffset(comFeat, feat, tw, TPL_INSET);
                     int    dx     = (int) m[0];
                     double score  = m[1];          // 최적 위치(dx) 상관
@@ -303,7 +305,11 @@ public class FrameExtractor {
                         double[] m2 = matchOffset(comFeat, feat, tw, secondInset);
                         boolean confidentDisagree = m2[1] >= MIN_SCORE
                                                  && Math.abs(dx - (int) m2[0]) > DX_AGREE_TOL;
-                        if (confidentDisagree) { isScroll = false; rejectCnt++; }
+                        if (confidentDisagree) {
+                            isScroll = false; rejectCnt++;
+                            log(logger, "[2밴드 거부] t=%.1fs dx1=%d dx2=%d (불일치>%dpx) → 스크롤 기각",
+                                currentUs / 1_000_000.0, dx, (int) m2[0], DX_AGREE_TOL);
+                        }
                     }
 
                     if (isScroll) {
@@ -362,9 +368,9 @@ public class FrameExtractor {
                 if (sampleIdx > 0 && sampleIdx % (scanFps * 8) == 0) {
                     double pct     = lengthUs > 0 ? (double) currentUs / lengthUs * 100 : -1;
                     long   elapsed = (System.currentTimeMillis() - startMs) / 1000;
-                    log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | 스크롤%d 페이지%d 정지%d 합의거부%d 트림%d",
+                    log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | %s",
                         Math.max(pct, 0), elapsed, canvasW, lastDx, lastScore,
-                        scrollCnt, pageCnt, staticCnt, rejectCnt, trimCnt);
+                        counts(scrollCnt, pageCnt, staticCnt, rejectCnt, trimCnt));
                 }
 
                 sampleIdx++;
@@ -382,11 +388,12 @@ public class FrameExtractor {
             Mat panorama = new Mat();
             Core.hconcat(colorStrips, panorama);
             for (Mat s : colorStrips) s.release();
-            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | 스크롤%d 페이지%d 정지%d 합의거부%d 트림%d",
-                panorama.cols(), panorama.rows(), scrollCnt, pageCnt, staticCnt, rejectCnt, trimCnt);
+            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | %s",
+                panorama.cols(), panorama.rows(),
+                counts(scrollCnt, pageCnt, staticCnt, rejectCnt, trimCnt));
 
             List<Path> saved;
-            if (mode == SheetMode.OPAQUE) {
+            if (bg == Background.OPAQUE) {
                 // 불투명: 이미 흰 종이+검정 악보라 이진화/노이즈 제거 없이 원본 그대로 잘라 저장(빠르고 충실).
                 saved = sliceAndSave(panorama, roiW, outDir, logger);
                 panorama.release();
@@ -451,7 +458,7 @@ public class FrameExtractor {
      * 배경 잡음이 훨씬 적음, 실측 검증됨). 가로 오선은 제거해 세로 특징 위주로 남긴다.
      */
     private Mat featureImage(Mat roiColor) {
-        if (mode == SheetMode.OPAQUE)      return featureImageOpaque(roiColor);
+        if (bg == Background.OPAQUE)       return featureImageOpaque(roiColor);
         // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
         Mat gray = new Mat();
         Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
@@ -512,7 +519,7 @@ public class FrameExtractor {
      * 매칭용 featureImage와 달리 가로 오선은 보존한다(악보의 일부).
      */
     private Mat cleanForOutput(Mat panoBGR) {
-        if (mode == SheetMode.OPAQUE)      return cleanForOutputOpaque(panoBGR);
+        if (bg == Background.OPAQUE)       return cleanForOutputOpaque(panoBGR);
         // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
         Mat gray = new Mat();
         Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
@@ -545,15 +552,15 @@ public class FrameExtractor {
     // 반투명/투명과 달리 배경 억제용 모폴로지가 거의 필요 없다.
     private static final int OPAQUE_BLOCK = 31;   // adaptiveThreshold 블록 크기(홀수). 클수록 큰 음영에 둔감.
     private static final int OPAQUE_C     = 12;   // 국소 배경 대비 잉크 판정 여유. 클수록 옅은 회색·잡티 덜 잡힘.
-    // 페이지 스냅샷(불투명): 확정 페이지와의 dx=0 상관이 SAME_PAGE 미만이면 '전환됨',
-    // 직전 프레임과의 상관이 STABLE_PAGE 이상이면 '안정(전환 끝남)'으로 보고 새 행을 붙인다.
+    // 페이지 스냅샷(화면 전환 motion): 확정 화면과의 dx=0 상관이 CUT_SAME_SCREEN 미만이면 '전환됨',
+    // 직전 프레임과의 상관이 CUT_STABLE 이상이면 '안정(전환 끝남)'으로 보고 새 행을 붙인다.
     // simConf 이중분포: ~0.70은 같은 페이지에서 재생 하이라이트/플레이헤드만 이동, ~0.50은 진짜 플립.
     // 둘 사이(0.62)로 갈라 하이라이트 이동은 무시하고 실제 페이지 전환만 새 행으로 커밋한다.
-    private static final double OPAQUE_SAME_PAGE   = 0.62; // 이 미만이면 확정 페이지와 다른 페이지(플립)
-    private static final double OPAQUE_STABLE_PAGE = 0.90; // 이 이상이면 직전과 같아 안정(미안정 전환 배제)
+    private static final double CUT_SAME_SCREEN   = 0.62; // 이 미만이면 확정 페이지와 다른 페이지(플립)
+    private static final double CUT_STABLE = 0.90; // 이 이상이면 직전과 같아 안정(미안정 전환 배제)
     // [A안] 새 페이지를 통째 붙이기 전, 확정 페이지와 겹친 만큼만 잘라 중복을 없앤다.
     //   누락이 더 치명적이므로 반투명(MIN_SCORE 0.40)보다 빡빡하게 — "확실할 때만" trim, 아니면 통째.
-    private static final double OPAQUE_TRIM_SCORE  = 0.60; // 겹침 신뢰 임계(이 미만이면 못 믿어 통째 붙임)
+    private static final double CUT_TRIM_SCORE  = 0.60; // 겹침 신뢰 임계(이 미만이면 못 믿어 통째 붙임)
 
     /**
      * 흰 배경 + 검정 악보를 "표기=흰(255) / 배경=검(0)" 이진 마스크로 만든다.
@@ -722,5 +729,16 @@ public class FrameExtractor {
     private static void log(ProgressLogger logger, String fmt, Object... args) {
         String msg = String.format(fmt, args);
         if (logger != null) logger.log(msg); else System.out.println(msg);
+    }
+
+    /** 카운터를 0이 아닌 것만 모아 표시(트림=불투명전용, 합의거부=반투명전용 등 모드별로 자동 생략). */
+    private static String counts(int scroll, int page, int stat, int reject, int trim) {
+        StringBuilder sb = new StringBuilder();
+        if (scroll > 0) sb.append(" 스크롤").append(scroll);
+        if (page   > 0) sb.append(" 페이지").append(page);
+        if (stat   > 0) sb.append(" 정지").append(stat);
+        if (reject > 0) sb.append(" 합의거부").append(reject);
+        if (trim   > 0) sb.append(" 트림").append(trim);
+        return sb.length() == 0 ? "-" : sb.toString().trim();
     }
 }

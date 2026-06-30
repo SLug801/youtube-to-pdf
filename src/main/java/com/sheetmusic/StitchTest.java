@@ -12,7 +12,7 @@ public class StitchTest {
 
         FrameExtractor.RoiConfig roi =
             new FrameExtractor.RoiConfig(top, bottom, 0.00, 1.00);
-        FrameExtractor fx = new FrameExtractor(roi, SheetMode.OPAQUE);
+        FrameExtractor fx = new FrameExtractor(roi, Background.OPAQUE, Motion.CUT);
 
         Path outDir = Path.of("stitchout");
         List<Path> frames = fx.extract(Path.of(video), outDir, ProgressLogger.console());

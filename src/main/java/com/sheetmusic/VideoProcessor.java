@@ -40,7 +40,8 @@ public class VideoProcessor {
             ProgressLogger logger,
             javax.swing.SwingWorker<?, ?> worker
     ) throws Exception {
-        return process(url, title, outputPdf, roi, logger, worker, null, SheetMode.TRANSLUCENT);
+        return process(url, title, outputPdf, roi, logger, worker, null,
+                Background.TRANSLUCENT, Motion.SCROLL);
     }
 
     /**
@@ -54,7 +55,8 @@ public class VideoProcessor {
             ProgressLogger logger,
             javax.swing.SwingWorker<?, ?> worker,
             Path preDownloadedVideo,
-            SheetMode mode
+            Background bg,
+            Motion motion
     ) throws Exception {
         if (logger == null) logger = ProgressLogger.console();
 
@@ -81,7 +83,7 @@ public class VideoProcessor {
             }
             checkCancellation(worker);
 
-            List<Path> frames = new FrameExtractor(roi, mode).extract(videoFile, framesDir, log);
+            List<Path> frames = new FrameExtractor(roi, bg, motion).extract(videoFile, framesDir, log);
             checkCancellation(worker);
 
             if (frames.isEmpty()) {

@@ -65,7 +65,8 @@ public class GuiApp {
     private javax.swing.Timer elapsedTimer;
     private long conversionStartMs;
     private FrameExtractor.RoiConfig currentRoi = FrameExtractor.RoiConfig.defaultConfig();
-    private SheetMode currentMode = SheetMode.TRANSLUCENT;
+    private Background currentBg     = Background.TRANSLUCENT;   // 축1: 배경 종류
+    private Motion     currentMotion = Motion.SCROLL;           // 축2: 진행 방식
     private SwingWorker<?, ?> currentWorker = null;
 
     // 프리뷰에서 받은 영상 캐시 — 같은 URL 변환 시 재다운로드 방지
@@ -168,26 +169,43 @@ public class GuiApp {
         gbc.gridy = row++;
         panel.add(hintLabel, gbc);
 
-        // 악보 배경 모드 선택(버튼)
+        // ── 축1: 배경 종류 (전처리·출력 정리 결정) ──
         gbc.gridy = row++;
-        panel.add(new JLabel("악보 배경 모드:"), gbc);
+        panel.add(new JLabel("배경 (영상 종류):"), gbc);
 
-        JToggleButton modeTranslucent = new JToggleButton(SheetMode.TRANSLUCENT.label, true);
-        JToggleButton modeOpaque      = new JToggleButton(SheetMode.OPAQUE.label);
-        modeTranslucent.setToolTipText("반투명 패널 위 악보(뮤비/연주 배경이 옅게 비침). 연속 스크롤 영상.");
-        modeOpaque.setToolTipText("흰 배경 + 검정 악보(스캔/PDF형, 페이지 넘김 영상 포함). 가장 깨끗하게 변환됨");
-
-        ButtonGroup modeGroup = new ButtonGroup();
-        modeGroup.add(modeTranslucent);
-        modeGroup.add(modeOpaque);
-        modeTranslucent.addActionListener(e -> currentMode = SheetMode.TRANSLUCENT);
-        modeOpaque.addActionListener(e -> currentMode = SheetMode.OPAQUE);
-
-        JPanel modeRow = new JPanel(new GridLayout(1, 2, 6, 0));
-        modeRow.add(modeTranslucent);
-        modeRow.add(modeOpaque);
+        JToggleButton bgTranslucent = new JToggleButton(Background.TRANSLUCENT.label, true);
+        JToggleButton bgOpaque      = new JToggleButton(Background.OPAQUE.label);
+        bgTranslucent.setToolTipText("뮤비·연주 영상이 악보 뒤로 옅게 비치는 영상 (배경 제거 처리)");
+        bgOpaque.setToolTipText("흰 배경에 검은 악보만 있는 영상 — 스캔/PDF형 (배경 제거 불필요, 가장 깨끗)");
+        ButtonGroup bgGroup = new ButtonGroup();
+        bgGroup.add(bgTranslucent);
+        bgGroup.add(bgOpaque);
+        bgTranslucent.addActionListener(e -> currentBg = Background.TRANSLUCENT);
+        bgOpaque.addActionListener(e -> currentBg = Background.OPAQUE);
+        JPanel bgRow = new JPanel(new GridLayout(1, 2, 6, 0));
+        bgRow.add(bgTranslucent);
+        bgRow.add(bgOpaque);
         gbc.gridy = row++;
-        panel.add(modeRow, gbc);
+        panel.add(bgRow, gbc);
+
+        // ── 축2: 진행 방식 (스티칭 전략 결정) ──
+        gbc.gridy = row++;
+        panel.add(new JLabel("진행 방식:"), gbc);
+
+        JToggleButton motionScroll = new JToggleButton(Motion.SCROLL.label, true);
+        JToggleButton motionCut    = new JToggleButton(Motion.CUT.label);
+        motionScroll.setToolTipText("악보가 가로로 흐르듯 이동 — 앞 화면과 겹침 있음");
+        motionCut.setToolTipText("한 화면이 멈췄다가 다음으로 넘어감 — 겹침 거의 없음 (페이지 넘김)");
+        ButtonGroup motionGroup = new ButtonGroup();
+        motionGroup.add(motionScroll);
+        motionGroup.add(motionCut);
+        motionScroll.addActionListener(e -> currentMotion = Motion.SCROLL);
+        motionCut.addActionListener(e -> currentMotion = Motion.CUT);
+        JPanel motionRow = new JPanel(new GridLayout(1, 2, 6, 0));
+        motionRow.add(motionScroll);
+        motionRow.add(motionCut);
+        gbc.gridy = row++;
+        panel.add(motionRow, gbc);
 
         // 완료되면 결과 폴더 열기
         openFolderCheckbox = new JCheckBox("완료되면 폴더 열기", true);
@@ -365,15 +383,16 @@ public class GuiApp {
         final Path reuseVideo =
             (cachedVideo != null && url.equals(cachedUrl) && Files.exists(cachedVideo))
                 ? cachedVideo : null;
-        final SheetMode mode = currentMode;
+        final Background bg     = currentBg;
+        final Motion     motion = currentMotion;
 
-        appendLog("악보 배경 모드: " + mode.label);
+        appendLog("배경: " + bg.label + " | 진행: " + motion.label);
 
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
                 return VideoProcessor.process(url, finalFilename.replaceAll("\\.pdf$", ""),
-                    outputPdf, currentRoi, this::publish, this, reuseVideo, mode);
+                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion);
             }
 
             @Override

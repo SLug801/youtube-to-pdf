@@ -33,7 +33,7 @@ public class OpaqueFrameTest {
             : new double[]{0.2, 0.4, 0.6, 0.8};
 
         FrameExtractor fx = new FrameExtractor(
-            FrameExtractor.RoiConfig.defaultConfig(), SheetMode.OPAQUE);
+            FrameExtractor.RoiConfig.defaultConfig(), Background.OPAQUE, Motion.CUT);
 
         for (double p : pos) {
             Mat full = FrameExtractor.captureFrameMat(Path.of(video), p);
