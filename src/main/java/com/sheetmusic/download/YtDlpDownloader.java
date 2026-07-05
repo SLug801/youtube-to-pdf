@@ -11,13 +11,25 @@ public class YtDlpDownloader {
     /**
      * 실행에 사용할 yt-dlp 실행파일 경로를 찾는다.
      * 배포본(jpackage app-image)에서는 PATH에 yt-dlp가 없으므로, 앱과 함께 동봉한
-     * yt-dlp.exe를 우선 찾는다. 탐색 순서:
+     * 실행파일을 우선 찾는다. 탐색 순서:
      *   1) 시스템 속성 -Dytpdf.ytdlp=경로
-     *   2) 실행 중인 jar/앱과 같은 폴더의 yt-dlp(.exe) (배포본: app\yt-dlp.exe)
-     *   3) 현재 작업 폴더의 yt-dlp.exe (개발 중 리포 루트)
+     *   2) 실행 중인 jar/앱과 같은 폴더의 yt-dlp (배포본: app\yt-dlp.exe)
+     *   3) 현재 작업 폴더의 yt-dlp (개발 중 리포 루트)
      *   4) PATH 의 yt-dlp (직접 설치한 경우)
+     *
+     * ※ 실행파일 이름은 OS별로 다르다. Windows 에서만 .exe 를 쓰고, macOS/Linux 에서는
+     *   .exe 후보를 아예 제외한다. (리포 루트의 Windows용 yt-dlp.exe 를 macOS 에서 잘못
+     *   골라 "Cannot run program … Permission denied" 로 죽는 문제 방지)
      */
     private static volatile String ytDlpCmd;
+
+    private static final boolean IS_WINDOWS =
+            System.getProperty("os.name", "").toLowerCase().contains("win");
+
+    /** OS에 맞는 yt-dlp 실행파일 후보 이름. Windows 만 .exe 를 포함한다. */
+    private static final String[] YTDLP_NAMES =
+            IS_WINDOWS ? new String[]{ "yt-dlp.exe", "yt-dlp" }
+                       : new String[]{ "yt-dlp" };
 
     static String ytDlp() {
         if (ytDlpCmd != null) return ytDlpCmd;
@@ -37,7 +49,7 @@ public class YtDlpDownloader {
             Path dir = Files.isRegularFile(code) ? code.getParent() : code;
             for (Path base : new Path[]{ dir, dir != null ? dir.getParent() : null }) {
                 if (base == null) continue;
-                for (String name : new String[]{ "yt-dlp.exe", "yt-dlp" }) {
+                for (String name : YTDLP_NAMES) {
                     Path cand = base.resolve(name);
                     if (Files.isRegularFile(cand)) return cand.toString();
                 }
@@ -45,7 +57,7 @@ public class YtDlpDownloader {
         } catch (Exception ignored) { }
 
         // 3) 현재 작업 폴더
-        for (String name : new String[]{ "yt-dlp.exe", "yt-dlp" }) {
+        for (String name : YTDLP_NAMES) {
             Path cand = Path.of(name).toAbsolutePath();
             if (Files.isRegularFile(cand)) return cand.toString();
         }
