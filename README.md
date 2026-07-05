@@ -1,27 +1,23 @@
 # YouTube TAB → PDF
 
-가로로 스크롤되거나 페이지가 넘어가는 **유튜브 베이스 타브(TAB) 악보 영상**을, 한 장으로 이어 붙인 **악보 PDF**로 변환하는 데스크톱 도구입니다.
+가로로 스크롤되거나 페이지가 넘어가는 유튜브 베이스/기타 타브(TAB) 악보 영상(TAB가 아니여도 가능할 것으로 예상)을, 한 장으로 이어 붙인 **악보 PDF**로 변환하는 데스크톱 도구입니다.
 
 영상마다 악보가 흘러가는 방식(연속 스크롤 / 페이지 넘김)과 배경(반투명 패널 / 흰 종이)이 달라서, 단순 캡처로는 깨끗한 악보가 나오지 않습니다. 이 프로젝트는 영상 프레임을 **정렬·병합(stitching)** 하고 **배경을 제거**해 읽을 수 있는 한 장짜리 악보를 만듭니다.
 
 ```
-YouTube URL
-   │  yt-dlp                (영상 다운로드)
-   ▼
-영상 파일
-   │  FFmpeg (JavaCV)       (프레임 디코딩)
-   ▼
-프레임들 ── OpenCV 정렬·병합 ──▶ 파노라마(가로로 긴 악보)
-                                   │  배경 제거 / 이진화
-                                   ▼
-                              chunk 단위로 잘라 PDFBox로 PDF 출력
+YouTube URL 입력
+yt-dlp로 영상 다운로드
+FFmpeg(JavaCV)로 프레임 디코딩
+OpenCV로 프레임 정렬·병합 → 가로로 긴 파노라마 악보 생성
+배경 제거 / 이진화로 노이즈 정리
+PDFBox로 chunk 단위 분할해 PDF 출력
 ```
 
 ---
 
 ## 주요 기능
 
-- **URL 붙여넣기 → PDF 한 번에** (GUI / CLI 양쪽 지원)
+- **URL 붙여넣기 → PDF 변환** (GUI / CLI 양쪽 지원)
 - **프리뷰에서 ROI(악보 영역)를 드래그로 지정** — 영상마다 악보 위치가 달라서 필수
 - **두 가지 악보 모드** (배경·스크롤 방식에 맞춰 선택)
 - 변환 중 **경과 시간 표시** + 마지막 로그에 총 소요 시간
@@ -40,6 +36,7 @@ YouTube URL
 - **정렬**: "지금까지 확정된 화면"에 새 프레임을 템플릿 매칭으로 맞춰 **우측 이동량(dx)** 을 구하고, 그만큼만 이어 붙임(슬릿스캔의 폭 한계가 없어 큰 점프도 측정).
 - **배경 억제**: 모폴로지 **블랙햇** — 국소 대비 기반이라 전역 밝기/투명도와 무관하게 "어두운 가는 표기(숫자·기둥·마디선)"만 남기고 움직이는 배경을 지움. (adaptiveThreshold보다 배경 잡음이 훨씬 적은 것을 실측으로 확인.)
 - **중복·누락 방지**: 단순 상관값만으로는 "정지 화면"과 "진짜 스크롤"을 못 가르기 때문에, dx 위치의 상관이 정지(dx=0)보다 **뚜렷이 높을 때만(margin)** 스크롤로 인정. 거기에 **2-밴드 합의**(다른 위치 밴드도 같은 dx를 가리켜야 채택)를 더해 반복 패턴의 주기적 오매칭을 걸러냄.
+- **새 페이지 중복 제거**: 반복 트레몰로(`16 16 / X X`) 구간에선 표기 특징이 저변동이라 특징 매칭이 무력화돼, 겹침을 못 보고 화면을 통째로 이어 붙이면서 같은 마디가 중복됐음. 이때 **원본 회색조로 겹침을 재측정**(오선·숫자 구조가 살아 있어 더 안정적)해 — 부분 겹침이면 그만큼만 잘라 붙이고, 전부 겹치면 버리며, **불확실하면 통째로 붙여 누락을 막음**.
 
 ### 불투명(OPAQUE) — 페이지 넘김
 흰 배경 + 검정 악보(스캔/PDF형). 화면이 **정지해 있다가 하드컷으로 몇 마디씩 점프**하는 형태. 연주자 영상이 위에 있고 악보 띠가 아래에 얇게 깔린 경우도 포함.
@@ -59,7 +56,7 @@ YouTube URL
 | 시도 | 결과 | 이유 |
 |---|---|---|
 | **마디선 기준 자르기** | 롤백 | 마디 길이가 들쭉날쭉이라 오히려 가독성이 나빠지고 오검출이 많음 |
-| **OCR로 마디 번호 읽기** (`MeasureDetector`/`MeasureOcr`) | 폐기 | 저해상도·디자인 폰트라 숫자 인식 실패. 대신 영상 신호(2-밴드 합의)로 해결 |
+| **OCR로 마디 번호 읽기** (Tesseract) | 폐기·코드 삭제 | 저해상도·디자인 폰트라 숫자 인식 실패. 대신 영상 신호(2-밴드 합의)로 해결 |
 | **투명(TRANSPARENT) 모드** | 삭제 | 연주자/악기가 악보 띠에 밝게 겹치는 영상은 단일 프레임으로 분리 불가능. tophat/blackhat 극성 보정 → 이진화 → hysteresis 혼합 → 큰 덩어리 제거까지 반복했지만 천장이 분명해 포기 |
 | **시간축(temporal median)으로 배경 분리** | 미채택 | 가로 스크롤이라 같은 마디가 3~5프레임밖에 안 보여 통계가 안 쌓임. 투자 대비 효과 작음 |
 | **불투명: 서브마디 정렬(dx 측정)** | 페이지 스냅샷으로 전환 | 마디가 주기적(약 200px 반복)이라 dx=한마디와 dx=0의 상관이 거의 같아 매칭이 주기에 속음. 겹침 슬리버가 템플릿보다 좁아 정렬 자체가 불가 → 페이지 단위 스냅샷이 더 안정적 |
@@ -69,8 +66,8 @@ YouTube URL
 ## 바꾼 것 (핵심 개선)
 
 - **속도**: seek-per-frame → **순차 디코딩 + frameSkip**, 스캔 FPS 분리.
-- **반투명 중복/누락 해결**: margin 기반 스크롤 판정 + **2-밴드 합의**, 인트로(빈 화면) 스킵, fade-in 대비 시드 갱신.
-- **불투명 모드 신설**: adaptiveThreshold 이진화 + **페이지 스냅샷** 스티칭.
+- **반투명 중복/누락 해결**: margin 기반 스크롤 판정 + **2-밴드 합의**, 인트로(빈 화면) 스킵, fade-in 대비 시드 갱신. 반복 패턴에서 생기던 페이지 통째-병합 중복은 **원본 회색조 재매칭**으로 제거(누락 없이).
+- **불투명 모드 신설**: adaptiveThreshold 이진화 + **페이지 스냅샷** 스티칭. 새 페이지를 붙이기 전 겹침을 **보수적으로 trim**해 경계 중복을 줄임(확신 없으면 누락 방지를 위해 통째로 유지).
 - **출력 노이즈 제거**: 밝기 바닥값 + 작은 고립 덩어리 제거(오선·숫자는 보존).
 - **GUI**: 드래그 ROI 프리뷰, 모드 버튼, 경과/총 시간 표시, 파일명 정규화, **완료 후 폴더 열기**.
 
@@ -80,7 +77,7 @@ YouTube URL
 
 - **ROI는 수동 지정**이 필요합니다. 영상마다 악보 위치가 달라 자동 검출은 아직 없음.
 - **불투명은 "페이지 넘김" 전제**입니다. 연속 스크롤 불투명 영상은 현재 미지원(패턴 자동 감지 필요).
-- 페이지 넘김 모드는 경계 마디가 **약 1마디 겹쳐** 보일 수 있습니다(영상이 원래 그렇게 보여주는 부분이라 가독성엔 무리 없음).
+- 페이지 넘김 모드는 병합 전 겹침을 보수적으로 잘라내지만, **확신이 없을 땐 누락을 막기 위해 통째로 붙여** 경계 마디가 살짝 겹쳐 보일 수 있습니다(가독성엔 무리 없음).
 - 흰 배경에 흰 글씨처럼 **휘도 정보에 없는 표기**는 단일 프레임에서 복원 불가.
 - yt-dlp 기반이라 유튜브 변경/지역 제한의 영향을 받습니다.
 
@@ -97,7 +94,7 @@ YouTube URL
 
 ## 기술 스택
 
-- **Java 21**, Maven (shaded jar)
+- **Java 21**, Gradle (shadow jar) — macOS/Windows/Linux 빌드 자동 지원
 - **OpenCV** (org.opencv via JavaCV/bytedeco) — 템플릿 매칭, 모폴로지, 이진화, 연결요소
 - **FFmpeg** (JavaCV `FFmpegFrameGrabber`, 내장) — 프레임 디코딩
 - **Apache PDFBox** — PDF 출력
@@ -108,27 +105,43 @@ YouTube URL
 
 ## 빌드 & 실행
 
-> Windows + JDK 21 기준. `yt-dlp.exe`는 리포에 포함, FFmpeg는 JavaCV 내장본을 사용(별도 설치 불필요).
+> JDK 21 필요. **macOS·Windows·Linux 모두 빌드 가능** — Gradle이 빌드하는 OS에 맞는 OpenCV/FFmpeg 네이티브를 자동 선택합니다. FFmpeg는 JavaCV 내장본을 사용(별도 설치 불필요).
+>
+> `yt-dlp`는 Windows에서는 리포에 포함된 `yt-dlp.exe`를 쓰고, **macOS/Linux에서는 PATH에 설치**해야 합니다 (`brew install yt-dlp` 또는 `pip install yt-dlp`).
+
+**macOS / Linux**
+
+```bash
+# 빌드  → build/libs/youtube-to-pdf-1.0.0-shaded.jar
+./gradlew shadowJar
+
+# GUI 실행 (또는 ./gradlew run)
+./run.sh
+```
+
+**Windows**
 
 ```bat
-:: 빌드
-build.bat              ::  → target\youtube-to-pdf-1.0.0-shaded.jar
+:: 빌드  → build\libs\youtube-to-pdf-1.0.0-shaded.jar
+build.bat
 
 :: GUI 실행
 run.bat
 ```
 
-**CLI**도 지원합니다:
+> 리포에 Gradle Wrapper 실행파일(`gradlew`)이 없으면 처음 한 번 `gradle wrapper`로 생성하세요(로컬 Gradle 설치 시). VS Code/IntelliJ의 Gradle 연동이 자동 생성하기도 합니다.
 
-```bat
-:: 단일/다중 URL
-java -jar target\youtube-to-pdf-1.0.0-shaded.jar <URL> [URL2 ...]
+**CLI**도 지원합니다(빌드된 jar 직접 실행):
 
-:: URL 목록 파일
-java -jar target\youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
+```bash
+# 단일/다중 URL
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar <URL> [URL2 ...]
 
-:: ROI 지정 (top,bottom,left,right 비율)
-java -jar target\youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
+# URL 목록 파일
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
+
+# ROI 지정 (top,bottom,left,right 비율)
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
 ```
 
 ### 사용 흐름 (GUI)
@@ -144,15 +157,27 @@ java -jar target\youtube-to-pdf-1.0.0-shaded.jar --roi 0.65,1.00,0.00,1.00 <URL>
 
 ```
 com/sheetmusic/
-├─ Main.java            진입점(CLI/GUI 분기)
-├─ GuiApp.java          Swing GUI (프리뷰·ROI·모드·타이머·폴더열기)
-├─ VideoProcessor.java  파이프라인 오케스트레이션
-├─ YtDlpDownloader.java yt-dlp 래퍼
-├─ FrameExtractor.java  핵심: 프레임 정렬·병합·배경 제거 (모드별 분기)
-├─ SheetMode.java       반투명 / 불투명 enum
-├─ PdfBuilder.java      PDFBox 출력
-├─ Config.java          상수
-└─ *Test.java           단일 프레임/로컬 영상 튜닝용 개발 도구
+├─ app/
+│  ├─ Main.java            진입점(CLI/GUI 분기)
+│  └─ GuiApp.java          Swing GUI (프리뷰·ROI·모드·타이머·폴더열기)
+│     ├─ PreviewPanel.java     드래그 조절 ROI 박스 프리뷰
+│     └─ CropPreviewPanel.java 캡처 영역 미리보기
+├─ pipeline/
+│  └─ VideoProcessor.java  파이프라인 오케스트레이션
+├─ download/
+│  └─ YtDlpDownloader.java yt-dlp 래퍼
+├─ vision/
+│  ├─ FrameExtractor.java  핵심: 프레임 정렬·병합 (모드별 스티칭)
+│  ├─ SheetImageOps.java   배경 제거·이진화·노이즈 제거 (Mat 연산)
+│  ├─ ScanParams.java      스캔/스티칭 튜닝 상수
+│  └─ SheetMode.java       반투명 / 불투명 enum
+├─ pdf/
+│  └─ PdfBuilder.java      PDFBox 출력
+├─ common/
+│  ├─ Config.java          상수
+│  └─ ProgressLogger.java  진행 로그 인터페이스
+└─ debug/
+   └─ *Test.java           단일 프레임/로컬 영상 튜닝용 개발 도구
 ```
 
 ---
