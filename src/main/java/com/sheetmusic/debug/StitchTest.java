@@ -2,8 +2,9 @@ package com.sheetmusic.debug;
 
 import com.sheetmusic.common.ProgressLogger;
 import com.sheetmusic.pdf.PdfBuilder;
+import com.sheetmusic.vision.Background;
 import com.sheetmusic.vision.FrameExtractor;
-import com.sheetmusic.vision.SheetMode;
+import com.sheetmusic.vision.Motion;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -17,7 +18,7 @@ public class StitchTest {
 
         FrameExtractor.RoiConfig roi =
             new FrameExtractor.RoiConfig(top, bottom, 0.00, 1.00);
-        FrameExtractor fx = new FrameExtractor(roi, SheetMode.OPAQUE);
+        FrameExtractor fx = new FrameExtractor(roi, Background.OPAQUE, Motion.CUT);
 
         Path outDir = Path.of("stitchout");
         List<Path> frames = fx.extract(Path.of(video), outDir, ProgressLogger.console());

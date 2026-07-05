@@ -9,7 +9,7 @@ import org.opencv.imgproc.Imgproc;
 
 /**
  * 악보 프레임에 대한 순수 이미지 연산(매칭용 특징 추출 / 출력용 배경 제거 / 노이즈 제거).
- * 입력 Mat → 출력 Mat 의 순수 함수 집합으로, {@link SheetMode}에 따라 반투명/불투명 처리를 분기한다.
+ * 입력 Mat → 출력 Mat 의 순수 함수 집합으로, {@link Background}에 따라 반투명/불투명 처리를 분기한다.
  * 스티칭 상태머신({@link FrameExtractor})과 분리해 알고리즘 코드의 가독성을 높인다.
  */
 class SheetImageOps {
@@ -25,10 +25,10 @@ class SheetImageOps {
     private static final int OPAQUE_BLOCK = 31;   // adaptiveThreshold 블록 크기(홀수). 클수록 큰 음영에 둔감.
     private static final int OPAQUE_C     = 12;   // 국소 배경 대비 잉크 판정 여유. 클수록 옅은 회색·잡티 덜 잡힘.
 
-    private final SheetMode mode;
+    private final Background bg;
 
-    SheetImageOps(SheetMode mode) {
-        this.mode = (mode != null) ? mode : SheetMode.TRANSLUCENT;
+    SheetImageOps(Background bg) {
+        this.bg = (bg != null) ? bg : Background.TRANSLUCENT;
     }
 
     /**
@@ -39,7 +39,7 @@ class SheetImageOps {
      * 배경 잡음이 훨씬 적음, 실측 검증됨). 가로 오선은 제거해 세로 특징 위주로 남긴다.
      */
     Mat featureImage(Mat roiColor) {
-        if (mode == SheetMode.OPAQUE)      return featureImageOpaque(roiColor);
+        if (bg == Background.OPAQUE)      return featureImageOpaque(roiColor);
         // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
         Mat gray = new Mat();
         Imgproc.cvtColor(roiColor, gray, Imgproc.COLOR_BGR2GRAY);
@@ -71,7 +71,7 @@ class SheetImageOps {
      * 매칭용 featureImage와 달리 가로 오선은 보존한다(악보의 일부).
      */
     Mat cleanForOutput(Mat panoBGR) {
-        if (mode == SheetMode.OPAQUE)      return cleanForOutputOpaque(panoBGR);
+        if (bg == Background.OPAQUE)      return cleanForOutputOpaque(panoBGR);
         // ── 이하 반투명(TRANSLUCENT) 기존 로직 ──
         Mat gray = new Mat();
         Imgproc.cvtColor(panoBGR, gray, Imgproc.COLOR_BGR2GRAY);
