@@ -16,7 +16,7 @@ final class ScanParams {
                                                 //   스크롤을 작은 스텝 여러 개로 쪼개 봐서, 한 스텝에
                                                 //   들어가는 반복 패턴이 줄고 매칭 정확↑(중복·누락 동시 감소).
                                                 //   대신 처리 시간이 비례해 늘어난다.
-    static final int    SCAN_FPS_OPAQUE = 6;    // 불투명(페이지 넘김)은 페이지가 몇 초씩 정지하므로
+    static final int    SCAN_FPS_CUT    = 6;    // 화면 전환(페이지 넘김)은 한 화면이 몇 초씩 정지하므로
                                                 //   초당 6회만 검사해도 전환을 놓치지 않는다. 매칭 연산을
                                                 //   1/3 이하로 줄여 속도↑(2샘플=약 0.33s면 새 페이지 확정).
     static final double TPL_RATIO    = 0.15;    // (was 0.12) 매칭 템플릿 폭(ROI 폭 대비).
@@ -47,14 +47,14 @@ final class ScanParams {
     static final double SECOND_BAND_RATIO = 0.30; // 둘째 밴드를 떼는 위치(ROI 폭 대비)
     static final int    DX_AGREE_TOL      = 6;    // 두 밴드 dx 허용 오차(px) — 이내면 일치로 봄
 
-    // ── 불투명(OPAQUE) 페이지 스냅샷 스티칭 임계 ──────────────────────────────
-    // 페이지 스냅샷(불투명): 확정 페이지와의 dx=0 상관이 SAME_PAGE 미만이면 '전환됨',
-    // 직전 프레임과의 상관이 STABLE_PAGE 이상이면 '안정(전환 끝남)'으로 보고 새 행을 붙인다.
+    // ── 화면 전환(CUT) 페이지 스냅샷 스티칭 임계 ──────────────────────────────
+    // 페이지 스냅샷(화면 전환): 확정 화면과의 dx=0 상관이 CUT_SAME_SCREEN 미만이면 '전환됨',
+    // 직전 프레임과의 상관이 CUT_STABLE 이상이면 '안정(전환 끝남)'으로 보고 새 행을 붙인다.
     // simConf 이중분포: ~0.70은 같은 페이지에서 재생 하이라이트/플레이헤드만 이동, ~0.50은 진짜 플립.
     // 둘 사이(0.62)로 갈라 하이라이트 이동은 무시하고 실제 페이지 전환만 새 행으로 커밋한다.
-    static final double OPAQUE_SAME_PAGE   = 0.62; // 이 미만이면 확정 페이지와 다른 페이지(플립)
-    static final double OPAQUE_STABLE_PAGE = 0.90; // 이 이상이면 직전과 같아 안정(미안정 전환 배제)
+    static final double CUT_SAME_SCREEN    = 0.62; // 이 미만이면 확정 화면과 다른 화면(전환)
+    static final double CUT_STABLE         = 0.90; // 이 이상이면 직전과 같아 안정(미안정 전환 배제)
     // [A안] 새 페이지를 통째 붙이기 전, 확정 페이지와 겹친 만큼만 잘라 중복을 없앤다.
     //   누락이 더 치명적이므로 반투명(MIN_SCORE 0.40)보다 빡빡하게 — "확실할 때만" trim, 아니면 통째.
-    static final double OPAQUE_TRIM_SCORE  = 0.60; // 겹침 신뢰 임계(이 미만이면 못 믿어 통째 붙임)
+    static final double CUT_TRIM_SCORE     = 0.60; // 겹침 신뢰 임계(이 미만이면 못 믿어 통째 붙임)
 }
