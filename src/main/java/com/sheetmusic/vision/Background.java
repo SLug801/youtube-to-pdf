@@ -1,4 +1,4 @@
-package com.sheetmusic;
+package com.sheetmusic.vision;
 
 /**
  * 악보 영상의 <b>배경 종류</b>(축 1). 전처리(특징 추출)와 출력 정리 방식을 결정한다.

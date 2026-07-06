@@ -1,4 +1,10 @@
-package com.sheetmusic;
+package com.sheetmusic.debug;
+
+import com.sheetmusic.common.ProgressLogger;
+import com.sheetmusic.pdf.PdfBuilder;
+import com.sheetmusic.vision.Background;
+import com.sheetmusic.vision.FrameExtractor;
+import com.sheetmusic.vision.Motion;
 
 import java.nio.file.Path;
 import java.util.List;

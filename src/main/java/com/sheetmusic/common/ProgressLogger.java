@@ -1,4 +1,4 @@
-package com.sheetmusic;
+package com.sheetmusic.common;
 
 @FunctionalInterface
 public interface ProgressLogger {

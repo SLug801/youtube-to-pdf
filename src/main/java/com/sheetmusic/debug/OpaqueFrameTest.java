@@ -1,4 +1,8 @@
-package com.sheetmusic;
+package com.sheetmusic.debug;
+
+import com.sheetmusic.vision.Background;
+import com.sheetmusic.vision.FrameExtractor;
+import com.sheetmusic.vision.Motion;
 
 import org.bytedeco.javacpp.Loader;
 import org.bytedeco.opencv.opencv_java;

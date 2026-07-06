@@ -1,4 +1,6 @@
-package com.sheetmusic;
+package com.sheetmusic.pdf;
+
+import com.sheetmusic.common.ProgressLogger;
 
 import java.io.IOException;
 import java.nio.file.Path;

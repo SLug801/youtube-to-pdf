@@ -1,4 +1,12 @@
-package com.sheetmusic;
+package com.sheetmusic.pipeline;
+
+import com.sheetmusic.common.Config;
+import com.sheetmusic.common.ProgressLogger;
+import com.sheetmusic.download.YtDlpDownloader;
+import com.sheetmusic.pdf.PdfBuilder;
+import com.sheetmusic.vision.Background;
+import com.sheetmusic.vision.FrameExtractor;
+import com.sheetmusic.vision.Motion;
 
 import java.io.IOException;
 import java.nio.file.Files;

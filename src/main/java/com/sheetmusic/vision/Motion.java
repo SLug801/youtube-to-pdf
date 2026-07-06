@@ -1,4 +1,4 @@
-package com.sheetmusic;
+package com.sheetmusic.vision;
 
 /**
  * 악보 영상의 <b>진행 방식</b>(축 2). 프레임을 이어 붙이는 스티칭 전략을 결정한다.

@@ -1,4 +1,4 @@
-package com.sheetmusic;
+package com.sheetmusic.common;
 
 public class Config {
     /** 캡처 이미지 저장 폴더명 */
