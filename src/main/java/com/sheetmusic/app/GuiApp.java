@@ -49,6 +49,7 @@ public class GuiApp {
     private JFrame frame;
     private JTextField urlField;
     private JTextField startTimeField;
+    private JTextField endTimeField;
     private JTextField filenameField;
     private JTextField folderField;
     private JButton previewButton;
@@ -131,13 +132,50 @@ public class GuiApp {
         gbc.gridy = row++;
         panel.add(urlField, gbc);
 
-        gbc.gridy = row++;
-        panel.add(new JLabel("추출 시작 시각 (선택):"), gbc);
+        JPanel rangePanel = new JPanel(new GridBagLayout());
+        rangePanel.setBorder(new TitledBorder("추출 구간 (선택)"));
+        GridBagConstraints rangeGbc = new GridBagConstraints();
+        rangeGbc.insets = new Insets(3, 4, 3, 4);
+        rangeGbc.gridy = 0;
+        rangeGbc.anchor = GridBagConstraints.CENTER;
 
-        startTimeField = new JTextField("00:00");
+        rangeGbc.gridx = 0;
+        rangePanel.add(new JLabel("시작"), rangeGbc);
+        startTimeField = new JTextField("", 6);
+        startTimeField.putClientProperty("JTextField.placeholderText", "처음부터");
         startTimeField.setToolTipText("인트로를 제외할 시작 시각. 예: 15, 00:15, 1:02:30");
+        rangeGbc.gridx = 1;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(startTimeField, rangeGbc);
+
+        rangeGbc.gridx = 2;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("~"), rangeGbc);
+
+        rangeGbc.gridx = 3;
+        rangePanel.add(new JLabel("종료"), rangeGbc);
+        endTimeField = new JTextField("", 6);
+        endTimeField.putClientProperty("JTextField.placeholderText", "끝까지");
+        endTimeField.setToolTipText("아웃트로 전에 끝낼 시각. 비워두면 영상 끝까지 추출합니다.");
+        rangeGbc.gridx = 4;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(endTimeField, rangeGbc);
+
+        JLabel rangeHint = new JLabel("빈칸: 처음부터 ~ 끝까지 · 예: 00:15 ~ 04:45");
+        rangeHint.setForeground(Color.GRAY);
+        rangeHint.setFont(rangeHint.getFont().deriveFont(11f));
+        rangeGbc.gridx = 0;
+        rangeGbc.gridy = 1;
+        rangeGbc.gridwidth = 5;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(rangeHint, rangeGbc);
+
         gbc.gridy = row++;
-        panel.add(startTimeField, gbc);
+        panel.add(rangePanel, gbc);
 
         previewButton = new JButton("프리뷰 불러오기");
         previewButton.addActionListener(e -> loadPreview());
@@ -293,11 +331,11 @@ public class GuiApp {
             return;
         }
 
-        final double previewStartSeconds;
+        final double[] extractionRange;
         try {
-            previewStartSeconds = TimeParser.parseSeconds(startTimeField.getText());
+            extractionRange = readExtractionRange();
         } catch (IllegalArgumentException e) {
-            JOptionPane.showMessageDialog(frame, e.getMessage(), "시작 시각 확인", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(frame, e.getMessage(), "추출 구간 확인", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -319,10 +357,19 @@ public class GuiApp {
             protected BufferedImage doInBackground() throws Exception {
                 tempFolder = Files.createTempDirectory("ytpdf-preview-");
                 tempVideo  = YtDlpDownloader.download(url, tempFolder, this::publish);
-                if (previewStartSeconds > 0) {
+                double startSeconds = extractionRange[0];
+                double endSeconds = extractionRange[1];
+                if (endSeconds > 0) {
+                    double previewSeconds = startSeconds + (endSeconds - startSeconds) / 2.0;
+                    publish("선택 구간의 중간 프레임 추출 중... ("
+                            + TimeParser.formatSeconds(previewSeconds) + ")");
+                    return FrameExtractor.captureFrameAtSeconds(
+                            tempVideo, previewSeconds, currentRoi);
+                }
+                if (startSeconds > 0) {
                     publish("지정한 시작 시각의 프레임 추출 중...");
                     return FrameExtractor.captureFrameAtSeconds(
-                            tempVideo, previewStartSeconds, currentRoi);
+                            tempVideo, startSeconds, currentRoi);
                 }
                 publish("중간 프레임 추출 중...");
                 return FrameExtractor.captureFrame(tempVideo, 0.5, currentRoi);
@@ -372,13 +419,15 @@ public class GuiApp {
             return;
         }
 
-        final double startSeconds;
+        final double[] extractionRange;
         try {
-            startSeconds = TimeParser.parseSeconds(startTimeField.getText());
+            extractionRange = readExtractionRange();
         } catch (IllegalArgumentException e) {
-            JOptionPane.showMessageDialog(frame, e.getMessage(), "시작 시각 확인", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(frame, e.getMessage(), "추출 구간 확인", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        final double startSeconds = extractionRange[0];
+        final double endSeconds = extractionRange[1];
 
         final String filename = filenameField.getText().trim();
         if (filename.isEmpty()) {
@@ -421,13 +470,15 @@ public class GuiApp {
         final Motion     motion = currentMotion;
 
         appendLog("배경: " + bg.label + " | 진행: " + motion.label
-                + " | 시작: " + TimeParser.formatSeconds(startSeconds));
+                + " | 구간: " + TimeParser.formatSeconds(startSeconds)
+                + " ~ " + (endSeconds > 0 ? TimeParser.formatSeconds(endSeconds) : "끝까지"));
 
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
                 return VideoProcessor.process(url, finalFilename.replaceAll("\\.pdf$", ""),
-                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion, startSeconds);
+                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion,
+                    startSeconds, endSeconds);
             }
 
             @Override
@@ -504,8 +555,19 @@ public class GuiApp {
         browseButton.setEnabled(!busy);
         urlField.setEnabled(!busy);
         startTimeField.setEnabled(!busy);
+        endTimeField.setEnabled(!busy);
         filenameField.setEnabled(!busy);
         folderField.setEnabled(!busy);
+    }
+
+    /** 시작/종료 입력을 초 단위로 변환하고 유효한 구간인지 확인한다. */
+    private double[] readExtractionRange() {
+        double startSeconds = TimeParser.parseSeconds(startTimeField.getText());
+        String endText = endTimeField.getText().trim();
+        double endSeconds = endText.isEmpty() ? 0 : TimeParser.parseSeconds(endText);
+        if (!endText.isEmpty() && endSeconds <= startSeconds)
+            throw new IllegalArgumentException("종료 시각은 시작 시각보다 뒤여야 합니다.");
+        return new double[] { startSeconds, endSeconds };
     }
 
     private void appendLog(String message) {

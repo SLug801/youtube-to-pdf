@@ -33,6 +33,17 @@ public class VideoProcessor {
             FrameExtractor.RoiConfig roi,
             double startSeconds
     ) throws Exception {
+        return process(url, title, roi, startSeconds, 0);
+    }
+
+    /** CLI용. 지정한 시작~종료 구간만 프레임 분석한다. endSeconds가 0이면 영상 끝까지 처리한다. */
+    public static String process(
+            String url,
+            String title,
+            FrameExtractor.RoiConfig roi,
+            double startSeconds,
+            double endSeconds
+    ) throws Exception {
         String safeTitle = sanitizeTitle(title);
         Path workDir   = Path.of(safeTitle);
         Path framesDir = workDir.resolve(Config.FRAMES_DIR);
@@ -42,7 +53,7 @@ public class VideoProcessor {
 
         Path videoFile = YtDlpDownloader.download(url, workDir);
         List<Path> frames = new FrameExtractor(
-                roi, Background.TRANSLUCENT, Motion.SCROLL, startSeconds)
+                roi, Background.TRANSLUCENT, Motion.SCROLL, startSeconds, endSeconds)
                 .extract(videoFile, framesDir);
         PdfBuilder.build(frames, pdfPath);
 
@@ -61,7 +72,7 @@ public class VideoProcessor {
             javax.swing.SwingWorker<?, ?> worker
     ) throws Exception {
         return process(url, title, outputPdf, roi, logger, worker, null,
-                Background.TRANSLUCENT, Motion.SCROLL, 0);
+                Background.TRANSLUCENT, Motion.SCROLL, 0, 0);
     }
 
     /**
@@ -79,7 +90,7 @@ public class VideoProcessor {
             Motion motion
     ) throws Exception {
         return process(url, title, outputPdf, roi, logger, worker,
-                preDownloadedVideo, bg, motion, 0);
+                preDownloadedVideo, bg, motion, 0, 0);
     }
 
     /**
@@ -96,6 +107,27 @@ public class VideoProcessor {
             Background bg,
             Motion motion,
             double startSeconds
+    ) throws Exception {
+        return process(url, title, outputPdf, roi, logger, worker,
+                preDownloadedVideo, bg, motion, startSeconds, 0);
+    }
+
+    /**
+     * GUI용. 지정한 시작~종료 구간만 분석하며, 다운로드 캐시가 있으면 그대로 재사용한다.
+     * endSeconds가 0이면 영상 끝까지 처리한다.
+     */
+    public static String process(
+            String url,
+            String title,
+            Path outputPdf,
+            FrameExtractor.RoiConfig roi,
+            ProgressLogger logger,
+            javax.swing.SwingWorker<?, ?> worker,
+            Path preDownloadedVideo,
+            Background bg,
+            Motion motion,
+            double startSeconds,
+            double endSeconds
     ) throws Exception {
         if (logger == null) logger = ProgressLogger.console();
 
@@ -122,7 +154,7 @@ public class VideoProcessor {
             }
             checkCancellation(worker);
 
-            List<Path> frames = new FrameExtractor(roi, bg, motion, startSeconds)
+            List<Path> frames = new FrameExtractor(roi, bg, motion, startSeconds, endSeconds)
                     .extract(videoFile, framesDir, log);
             checkCancellation(worker);
 

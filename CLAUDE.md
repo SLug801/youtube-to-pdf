@@ -32,6 +32,7 @@ run.bat
 java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>" ["<URL2>" ...]
 java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
 java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 "<URL>"
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end 04:45 "<URL>"
 
 # 개발용 단발 테스트 클래스(JUnit 아님, main 메서드 직접 실행)
 #   StitchTest      : 로컬 영상에 스티칭(불투명+화면전환) 적용 → stitchout.pdf

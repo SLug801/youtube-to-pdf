@@ -10,6 +10,7 @@ class TimeParserTest {
     @Test
     void parsesSecondsAndClockFormats() {
         assertEquals(0, TimeParser.parseSeconds(""));
+        assertEquals(0, TimeParser.parseSeconds("   "));
         assertEquals(75, TimeParser.parseSeconds("75"));
         assertEquals(75.5, TimeParser.parseSeconds("75.5"));
         assertEquals(75, TimeParser.parseSeconds("01:15"));

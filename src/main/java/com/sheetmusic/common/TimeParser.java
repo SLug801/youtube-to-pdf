@@ -46,6 +46,6 @@ public final class TimeParser {
 
     private static IllegalArgumentException invalid(String value) {
         return new IllegalArgumentException(
-                "시작 시각 형식이 올바르지 않습니다: " + value + " (예: 75, 01:15, 1:02:30)");
+                "시각 형식이 올바르지 않습니다: " + value + " (예: 75, 01:15, 1:02:30)");
     }
 }
