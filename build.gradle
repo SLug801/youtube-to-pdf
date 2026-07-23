@@ -49,6 +49,13 @@ dependencies {
 
     // 모던 Swing 테마(Look & Feel)
     implementation 'com.formdev:flatlaf:3.5.4'
+
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
 }
 
 application {

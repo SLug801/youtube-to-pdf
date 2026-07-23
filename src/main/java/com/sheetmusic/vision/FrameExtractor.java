@@ -8,6 +8,7 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -30,8 +31,9 @@ import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 
 /**
- * 가로로 스크롤되는 TAB 악보 영상을 한 장의 긴 파노라마로 재구성한 뒤
- * 줄 단위로 잘라 PDF용 이미지로 저장한다.
+ * 가로로 스크롤되는 TAB 악보 영상을 이어 붙이되, 한 화면 폭이 완성될 때마다
+ * PDF용 이미지를 즉시 저장한다. 전체 파노라마를 메모리에 쌓지 않으므로 영상 길이가
+ * 길어져도 스티칭 버퍼는 최대 두 화면 미만으로 유지된다.
  *
  * 영상 형태: 악보는 대부분 정지(재생 커서만 이동)하다가 줄 끝에서 스크롤되는 방식.
  * 따라서 "정지 구간은 무시하고, 실제 스크롤이 감지될 때만" 새 콘텐츠를 이어붙인다.
@@ -139,7 +141,8 @@ public class FrameExtractor {
             log(logger, "[설정] 배경=%s | 진행=%s | ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
                 bg.label, motion.label, roi, tw, MIN_SCORE, STABLE_SCORE);
 
-            List<Mat> colorStrips = new ArrayList<>();
+            StreamingRowWriter rowWriter = new StreamingRowWriter(roiW, roiH, outDir, logger);
+            try {
             Mat   comFeat   = null;       // 파노라마 프런티어에 해당하는 "확정 화면"의 특징(roiW 폭)
             Mat   comColor  = null;       // 같은 확정 화면의 컬러본(반복 패턴에서 raw 겹침 재확인용)
             Mat   lastFeat  = null;       // 직전 샘플 프레임의 특징(정지/새 페이지 판정용)
@@ -187,7 +190,7 @@ public class FrameExtractor {
                         continue;
                     }
                     // 첫 콘텐츠 프레임: 화면 전체를 시드로
-                    colorStrips.add(roiColor.clone());
+                    rowWriter.seed(roiColor);
                     comFeat  = feat.clone();
                     comColor = roiColor.clone();
                     lastFeat = feat.clone();
@@ -232,19 +235,17 @@ public class FrameExtractor {
                         }
 
                         // 신뢰 시 겹친 (roiW-dx)만 버리고 새로 드러난 dx만, 아니면 통째
-                        Mat piece = trustOverlap
-                            ? new Mat(roiColor, new Rect(roiW - dx, 0, dx, roiH)).clone()
-                            : roiColor.clone();
-                        colorStrips.add(piece);
+                        int appendedW = trustOverlap ? dx : roiW;
+                        if (trustOverlap) rowWriter.appendSlice(roiColor, roiW - dx, dx);
+                        else              rowWriter.append(roiColor);
                         comFeat.release(); comFeat = feat.clone();
-                        canvasW += piece.cols();
+                        canvasW += appendedW;
                         pageCnt++;
                         if (trustOverlap) trimCnt++;
                         scrolled = true;
                     } else if (!scrolled && !changed) {
                         // 첫 페이지 전 정지 구간 → 또렷한 최신 프레임으로 시드 교체(흐린 첫 프레임 방지)
-                        colorStrips.get(0).release();
-                        colorStrips.set(0, roiColor.clone());
+                        rowWriter.replaceSeed(roiColor);
                         comFeat.release(); comFeat = feat.clone();
                         staticCnt++;
                     } else {
@@ -277,7 +278,7 @@ public class FrameExtractor {
                     }
 
                     if (isScroll) {
-                        colorStrips.add(new Mat(roiColor, new Rect(roiW - dx, 0, dx, roiH)).clone());
+                        rowWriter.appendSlice(roiColor, roiW - dx, dx);
                         comFeat.release();  comFeat  = feat.clone();
                         comColor.release(); comColor = roiColor.clone();
                         canvasW += dx;
@@ -285,8 +286,7 @@ public class FrameExtractor {
                         scrolled = true;
                     } else if (!scrolled && zero >= SEED_REFRESH_SCORE) {
                         // 첫 스크롤 전 동일 화면(인트로) → 또렷한 최신 프레임으로 시드 교체.
-                        colorStrips.get(0).release();
-                        colorStrips.set(0, roiColor.clone());
+                        rowWriter.replaceSeed(roiColor);
                         comFeat.release();  comFeat  = feat.clone();
                         comColor.release(); comColor = roiColor.clone();
                         staticCnt++;
@@ -301,7 +301,7 @@ public class FrameExtractor {
                             double gsc = g[1];
                             if (gsc >= NEWPAGE_OVERLAP_SCORE && gdx >= 0 && gdx <= roiW - tw) {
                                 if (gdx >= MIN_SHIFT) {            // 부분 겹침 → 새로 드러난 gdx만(스크롤로 재분류)
-                                    colorStrips.add(new Mat(roiColor, new Rect(roiW - gdx, 0, gdx, roiH)).clone());
+                                    rowWriter.appendSlice(roiColor, roiW - gdx, gdx);
                                     comFeat.release();  comFeat  = feat.clone();
                                     comColor.release(); comColor = roiColor.clone();
                                     canvasW += gdx;
@@ -311,7 +311,7 @@ public class FrameExtractor {
                                     staticCnt++;                  // 전부 겹침 = 순수 중복 → 버림(이미 있으니 누락 아님)
                                 }
                             } else {                              // 겹침 불확실 → 진짜 새 페이지로 보고 통째(기존 동작)
-                                colorStrips.add(roiColor.clone());
+                                rowWriter.append(roiColor);
                                 comFeat.release();  comFeat  = feat.clone();
                                 comColor.release(); comColor = roiColor.clone();
                                 canvasW += roiW;
@@ -344,31 +344,20 @@ public class FrameExtractor {
             if (comColor != null) comColor.release();
             if (lastFeat != null) lastFeat.release();
 
-            if (colorStrips.isEmpty()) {
+            if (!started) {
                 log(logger, "[경고] 콘텐츠를 찾지 못했습니다.");
                 return new ArrayList<>();
             }
 
-            Mat panorama = new Mat();
-            Core.hconcat(colorStrips, panorama);
-            for (Mat s : colorStrips) s.release();
-            log(logger, "[파노라마] 폭=%dpx 높이=%dpx | %s",
-                panorama.cols(), panorama.rows(),
+            List<Path> saved = rowWriter.finish();
+            log(logger, "[스트리밍 스티칭] 누적 폭=%dpx 높이=%dpx | 임시 버퍼≤%dpx | %s",
+                canvasW, roiH, roiW * 2,
                 counts(scrollCnt, pageCnt, staticCnt, rejectCnt, trimCnt));
-
-            List<Path> saved;
-            if (bg == Background.OPAQUE) {
-                // 불투명: 이미 흰 종이+검정 악보라 이진화/노이즈 제거 없이 원본 그대로 잘라 저장(빠르고 충실).
-                saved = sliceAndSave(panorama, roiW, outDir, logger);
-                panorama.release();
-            } else {
-                Mat cleaned = imageOps.cleanForOutput(panorama);   // 반투명: 배경 제거 → 흰 종이+검은 표기
-                panorama.release();
-                saved = sliceAndSave(cleaned, roiW, outDir, logger);
-                cleaned.release();
-            }
             log(logger, "[완료] 총 %d줄 생성", saved.size());
             return saved;
+            } finally {
+                rowWriter.close();
+            }
         }
     }
 
@@ -414,33 +403,121 @@ public class FrameExtractor {
         return new double[]{ (int) mmr.maxLoc.x - tx, mmr.maxVal, zero };
     }
 
-    /** 파노라마를 chunkW 단위로 잘라 PDF용 이미지로 저장. 마지막 좁은 조각은 흰 여백으로 패딩. */
-    private List<Path> sliceAndSave(Mat panorama, int chunkW, Path outDir, ProgressLogger logger)
-            throws Exception {
-        int Pw = panorama.cols(), Ph = panorama.rows();
-        List<Path> saved = new ArrayList<>();
-        int idx = 0;
+    /**
+     * 이어 붙인 원본 조각을 최대 두 화면 미만의 버퍼에만 보관하고, 한 화면 폭이 완성될 때마다
+     * 즉시 이미지 파일로 내보낸다. 첫 화면은 fade-in 시드 교체가 끝날 때까지 flush하지 않는다.
+     */
+    final class StreamingRowWriter implements AutoCloseable {
+        private static final int MIN_LAST_ROW_WIDTH = 40;
 
-        for (int x = 0; x < Pw; x += chunkW) {
-            int w = Math.min(chunkW, Pw - x);
-            if (w < 40) break;
+        private final int chunkW;
+        private final int rowH;
+        private final Path outDir;
+        private final ProgressLogger logger;
+        private final List<Path> saved = new ArrayList<>();
+        private Mat pending = new Mat();
+        private int nextIndex;
+        private boolean finished;
 
-            Mat out = new Mat(panorama, new Rect(x, 0, w, Ph)).clone();
-
-            if (w < chunkW) {                          // 마지막 조각 패딩(과대 확대 방지)
-                Mat padded = new Mat(Ph, chunkW, out.type(), new Scalar(255, 255, 255));
-                out.copyTo(padded.submat(new Rect(0, 0, w, Ph)));
-                out.release();
-                out = padded;
-            }
-
-            Path p = outDir.resolve(String.format("frame_%04d.jpg", idx++));
-            Imgcodecs.imwrite(p.toString(), out);
-            out.release();
-            saved.add(p);
-            log(logger, "FRAME_SAVED:%s", p.toAbsolutePath());
+        StreamingRowWriter(int chunkW, int rowH, Path outDir, ProgressLogger logger) {
+            this.chunkW = chunkW;
+            this.rowH = rowH;
+            this.outDir = outDir;
+            this.logger = logger;
         }
-        return saved;
+
+        /** 첫 콘텐츠 화면. 실제 이동이 확인되기 전에는 더 또렷한 프레임으로 교체될 수 있다. */
+        void seed(Mat frame) {
+            pending.release();
+            pending = frame.clone();
+        }
+
+        void replaceSeed(Mat frame) {
+            if (!saved.isEmpty() || pending.cols() != chunkW) {
+                throw new IllegalStateException("이미 확정된 악보 줄의 시드는 교체할 수 없습니다.");
+            }
+            seed(frame);
+        }
+
+        /** source의 픽셀을 복사해 버퍼에 추가하므로 호출자가 source를 계속 관리한다. */
+        void append(Mat source) throws IOException {
+            if (finished) throw new IllegalStateException("이미 완료된 스트리밍 출력입니다.");
+            if (source == null || source.empty()) return;
+
+            Mat combined = new Mat();
+            if (pending.empty()) {
+                source.copyTo(combined);
+            } else {
+                Core.hconcat(List.of(pending, source), combined);
+            }
+            pending.release();
+            pending = combined;
+
+            while (pending.cols() >= chunkW) {
+                Mat row = new Mat(pending, new Rect(0, 0, chunkW, rowH)).clone();
+                int remainingW = pending.cols() - chunkW;
+                Mat remaining = remainingW > 0
+                        ? new Mat(pending, new Rect(chunkW, 0, remainingW, rowH)).clone()
+                        : new Mat();
+                pending.release();
+                pending = remaining;
+                try {
+                    saveRow(row);
+                } finally {
+                    row.release();
+                }
+            }
+        }
+
+        void appendSlice(Mat source, int x, int width) throws IOException {
+            Mat slice = new Mat(source, new Rect(x, 0, width, rowH));
+            try {
+                append(slice);
+            } finally {
+                slice.release();
+            }
+        }
+
+        /** 마지막 남은 조각을 흰 여백으로 패딩한 뒤 저장한다. */
+        List<Path> finish() throws IOException {
+            if (finished) return List.copyOf(saved);
+            finished = true;
+
+            if (!pending.empty() && pending.cols() >= MIN_LAST_ROW_WIDTH) {
+                Mat padded = new Mat(rowH, chunkW, pending.type(), new Scalar(255, 255, 255));
+                Mat target = new Mat(padded, new Rect(0, 0, pending.cols(), rowH));
+                pending.copyTo(target);
+                target.release();
+                try {
+                    saveRow(padded);
+                } finally {
+                    padded.release();
+                }
+            }
+            pending.release();
+            pending = new Mat();
+            return List.copyOf(saved);
+        }
+
+        private void saveRow(Mat rawRow) throws IOException {
+            Mat output = bg == Background.OPAQUE ? rawRow : imageOps.cleanForOutput(rawRow);
+            Path path = outDir.resolve(String.format("frame_%04d.jpg", nextIndex++));
+            boolean written;
+            try {
+                written = Imgcodecs.imwrite(path.toString(), output);
+            } finally {
+                if (output != rawRow) output.release();
+            }
+            if (!written) throw new IOException("악보 이미지 저장 실패: " + path);
+            saved.add(path);
+            log(logger, "FRAME_SAVED:%s", path.toAbsolutePath());
+        }
+
+        @Override
+        public void close() {
+            pending.release();
+            pending = new Mat();
+        }
     }
 
     // [테스트 전용] 불투명 모드 디버그 훅 — OpaqueFrameTest에서 호출. 앱 동작과 무관.
