@@ -29,6 +29,7 @@ import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JToggleButton;
 import javax.swing.JFrame;
@@ -48,8 +49,11 @@ public class GuiApp {
 
     private JFrame frame;
     private JTextField urlField;
-    private JTextField startTimeField;
-    private JTextField endTimeField;
+    private JComboBox<String> startMinuteCombo;
+    private JComboBox<String> startSecondCombo;
+    private JComboBox<String> endMinuteCombo;
+    private JComboBox<String> endSecondCombo;
+    private JCheckBox endAtVideoEndCheckbox;
     private JTextField filenameField;
     private JTextField folderField;
     private JButton previewButton;
@@ -141,35 +145,71 @@ public class GuiApp {
 
         rangeGbc.gridx = 0;
         rangePanel.add(new JLabel("시작"), rangeGbc);
-        startTimeField = new JTextField("", 6);
-        startTimeField.putClientProperty("JTextField.placeholderText", "처음부터");
-        startTimeField.setToolTipText("인트로를 제외할 시작 시각. 예: 15, 00:15, 1:02:30");
+        startMinuteCombo = createTimeCombo(300);
+        startMinuteCombo.setToolTipText("추출을 시작할 분");
         rangeGbc.gridx = 1;
         rangeGbc.weightx = 1.0;
         rangeGbc.fill = GridBagConstraints.HORIZONTAL;
-        rangePanel.add(startTimeField, rangeGbc);
+        rangePanel.add(startMinuteCombo, rangeGbc);
 
         rangeGbc.gridx = 2;
         rangeGbc.weightx = 0;
         rangeGbc.fill = GridBagConstraints.NONE;
-        rangePanel.add(new JLabel("~"), rangeGbc);
+        rangePanel.add(new JLabel("분"), rangeGbc);
 
         rangeGbc.gridx = 3;
-        rangePanel.add(new JLabel("종료"), rangeGbc);
-        endTimeField = new JTextField("", 6);
-        endTimeField.putClientProperty("JTextField.placeholderText", "끝까지");
-        endTimeField.setToolTipText("아웃트로 전에 끝낼 시각. 비워두면 영상 끝까지 추출합니다.");
-        rangeGbc.gridx = 4;
+        startSecondCombo = createTimeCombo(59);
+        startSecondCombo.setToolTipText("추출을 시작할 초");
         rangeGbc.weightx = 1.0;
         rangeGbc.fill = GridBagConstraints.HORIZONTAL;
-        rangePanel.add(endTimeField, rangeGbc);
+        rangePanel.add(startSecondCombo, rangeGbc);
 
-        JLabel rangeHint = new JLabel("빈칸: 처음부터 ~ 끝까지 · 예: 00:15 ~ 04:45");
+        rangeGbc.gridx = 4;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("초"), rangeGbc);
+
+        rangeGbc.gridx = 0;
+        rangeGbc.gridy = 1;
+        rangePanel.add(new JLabel("종료"), rangeGbc);
+        endMinuteCombo = createTimeCombo(300);
+        endMinuteCombo.setToolTipText("추출을 끝낼 분");
+        rangeGbc.gridx = 1;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(endMinuteCombo, rangeGbc);
+
+        rangeGbc.gridx = 2;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("분"), rangeGbc);
+
+        endSecondCombo = createTimeCombo(59);
+        endSecondCombo.setToolTipText("추출을 끝낼 초");
+        rangeGbc.gridx = 3;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(endSecondCombo, rangeGbc);
+
+        rangeGbc.gridx = 4;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("초"), rangeGbc);
+
+        endAtVideoEndCheckbox = new JCheckBox("끝까지", true);
+        endAtVideoEndCheckbox.setToolTipText("체크하면 종료 시간을 지정하지 않고 영상 끝까지 추출합니다.");
+        endAtVideoEndCheckbox.addActionListener(e -> updateEndTimeControls());
+        rangeGbc.gridx = 5;
+        rangePanel.add(endAtVideoEndCheckbox, rangeGbc);
+
+        updateEndTimeControls();
+
+        JLabel rangeHint = new JLabel("시작 00분 00초 = 처음부터 · 종료 기본값 = 끝까지");
         rangeHint.setForeground(Color.GRAY);
         rangeHint.setFont(rangeHint.getFont().deriveFont(11f));
         rangeGbc.gridx = 0;
-        rangeGbc.gridy = 1;
-        rangeGbc.gridwidth = 5;
+        rangeGbc.gridy = 2;
+        rangeGbc.gridwidth = 6;
         rangeGbc.weightx = 1.0;
         rangeGbc.fill = GridBagConstraints.HORIZONTAL;
         rangePanel.add(rangeHint, rangeGbc);
@@ -554,20 +594,47 @@ public class GuiApp {
         convertButton.setEnabled(!busy);
         browseButton.setEnabled(!busy);
         urlField.setEnabled(!busy);
-        startTimeField.setEnabled(!busy);
-        endTimeField.setEnabled(!busy);
+        startMinuteCombo.setEnabled(!busy);
+        startSecondCombo.setEnabled(!busy);
+        endAtVideoEndCheckbox.setEnabled(!busy);
+        endMinuteCombo.setEnabled(!busy && !endAtVideoEndCheckbox.isSelected());
+        endSecondCombo.setEnabled(!busy && !endAtVideoEndCheckbox.isSelected());
         filenameField.setEnabled(!busy);
         folderField.setEnabled(!busy);
     }
 
     /** 시작/종료 입력을 초 단위로 변환하고 유효한 구간인지 확인한다. */
     private double[] readExtractionRange() {
-        double startSeconds = TimeParser.parseSeconds(startTimeField.getText());
-        String endText = endTimeField.getText().trim();
-        double endSeconds = endText.isEmpty() ? 0 : TimeParser.parseSeconds(endText);
-        if (!endText.isEmpty() && endSeconds <= startSeconds)
+        double startSeconds = selectedTime(startMinuteCombo, startSecondCombo);
+        double endSeconds = endAtVideoEndCheckbox.isSelected()
+                ? 0 : selectedTime(endMinuteCombo, endSecondCombo);
+        if (!endAtVideoEndCheckbox.isSelected() && endSeconds <= startSeconds)
             throw new IllegalArgumentException("종료 시각은 시작 시각보다 뒤여야 합니다.");
         return new double[] { startSeconds, endSeconds };
+    }
+
+    private JComboBox<String> createTimeCombo(int max) {
+        String[] values = new String[max + 1];
+        for (int i = 0; i <= max; i++)
+            values[i] = String.format("%02d", i);
+        JComboBox<String> combo = new JComboBox<>(values);
+        combo.setMaximumRowCount(10);
+        return combo;
+    }
+
+    private double selectedTime(
+            JComboBox<String> minuteCombo,
+            JComboBox<String> secondCombo
+    ) {
+        int minutes = Integer.parseInt((String) minuteCombo.getSelectedItem());
+        int seconds = Integer.parseInt((String) secondCombo.getSelectedItem());
+        return minutes * 60.0 + seconds;
+    }
+
+    private void updateEndTimeControls() {
+        boolean enabled = !endAtVideoEndCheckbox.isSelected();
+        endMinuteCombo.setEnabled(enabled);
+        endSecondCombo.setEnabled(enabled);
     }
 
     private void appendLog(String message) {
