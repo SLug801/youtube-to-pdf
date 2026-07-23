@@ -1,5 +1,6 @@
 package com.sheetmusic.app;
 
+import com.sheetmusic.common.TimeParser;
 import com.sheetmusic.download.YtDlpDownloader;
 import com.sheetmusic.pipeline.VideoProcessor;
 import com.sheetmusic.vision.Background;
@@ -28,6 +29,7 @@ import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JToggleButton;
 import javax.swing.JFrame;
@@ -47,6 +49,11 @@ public class GuiApp {
 
     private JFrame frame;
     private JTextField urlField;
+    private JComboBox<String> startMinuteCombo;
+    private JComboBox<String> startSecondCombo;
+    private JComboBox<String> endMinuteCombo;
+    private JComboBox<String> endSecondCombo;
+    private JCheckBox endAtVideoEndCheckbox;
     private JTextField filenameField;
     private JTextField folderField;
     private JButton previewButton;
@@ -128,6 +135,87 @@ public class GuiApp {
         urlField = new JTextField();
         gbc.gridy = row++;
         panel.add(urlField, gbc);
+
+        JPanel rangePanel = new JPanel(new GridBagLayout());
+        rangePanel.setBorder(new TitledBorder("추출 구간 (선택)"));
+        GridBagConstraints rangeGbc = new GridBagConstraints();
+        rangeGbc.insets = new Insets(3, 4, 3, 4);
+        rangeGbc.gridy = 0;
+        rangeGbc.anchor = GridBagConstraints.CENTER;
+
+        rangeGbc.gridx = 0;
+        rangePanel.add(new JLabel("시작"), rangeGbc);
+        startMinuteCombo = createTimeCombo(300);
+        startMinuteCombo.setToolTipText("추출을 시작할 분");
+        rangeGbc.gridx = 1;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(startMinuteCombo, rangeGbc);
+
+        rangeGbc.gridx = 2;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("분"), rangeGbc);
+
+        rangeGbc.gridx = 3;
+        startSecondCombo = createTimeCombo(59);
+        startSecondCombo.setToolTipText("추출을 시작할 초");
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(startSecondCombo, rangeGbc);
+
+        rangeGbc.gridx = 4;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("초"), rangeGbc);
+
+        rangeGbc.gridx = 0;
+        rangeGbc.gridy = 1;
+        rangePanel.add(new JLabel("종료"), rangeGbc);
+        endMinuteCombo = createTimeCombo(300);
+        endMinuteCombo.setToolTipText("추출을 끝낼 분");
+        rangeGbc.gridx = 1;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(endMinuteCombo, rangeGbc);
+
+        rangeGbc.gridx = 2;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("분"), rangeGbc);
+
+        endSecondCombo = createTimeCombo(59);
+        endSecondCombo.setToolTipText("추출을 끝낼 초");
+        rangeGbc.gridx = 3;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(endSecondCombo, rangeGbc);
+
+        rangeGbc.gridx = 4;
+        rangeGbc.weightx = 0;
+        rangeGbc.fill = GridBagConstraints.NONE;
+        rangePanel.add(new JLabel("초"), rangeGbc);
+
+        endAtVideoEndCheckbox = new JCheckBox("끝까지", true);
+        endAtVideoEndCheckbox.setToolTipText("체크하면 종료 시간을 지정하지 않고 영상 끝까지 추출합니다.");
+        endAtVideoEndCheckbox.addActionListener(e -> updateEndTimeControls());
+        rangeGbc.gridx = 5;
+        rangePanel.add(endAtVideoEndCheckbox, rangeGbc);
+
+        updateEndTimeControls();
+
+        JLabel rangeHint = new JLabel("시작 00분 00초 = 처음부터 · 종료 기본값 = 끝까지");
+        rangeHint.setForeground(Color.GRAY);
+        rangeHint.setFont(rangeHint.getFont().deriveFont(11f));
+        rangeGbc.gridx = 0;
+        rangeGbc.gridy = 2;
+        rangeGbc.gridwidth = 6;
+        rangeGbc.weightx = 1.0;
+        rangeGbc.fill = GridBagConstraints.HORIZONTAL;
+        rangePanel.add(rangeHint, rangeGbc);
+
+        gbc.gridy = row++;
+        panel.add(rangePanel, gbc);
 
         previewButton = new JButton("프리뷰 불러오기");
         previewButton.addActionListener(e -> loadPreview());
@@ -283,6 +371,14 @@ public class GuiApp {
             return;
         }
 
+        final double[] extractionRange;
+        try {
+            extractionRange = readExtractionRange();
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(frame, e.getMessage(), "추출 구간 확인", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         setBusy(true);
         appendLog("프리뷰 로딩 중... 잠시만 기다려주세요.");
         previewPanel.clearImage();
@@ -301,6 +397,20 @@ public class GuiApp {
             protected BufferedImage doInBackground() throws Exception {
                 tempFolder = Files.createTempDirectory("ytpdf-preview-");
                 tempVideo  = YtDlpDownloader.download(url, tempFolder, this::publish);
+                double startSeconds = extractionRange[0];
+                double endSeconds = extractionRange[1];
+                if (endSeconds > 0) {
+                    double previewSeconds = startSeconds + (endSeconds - startSeconds) / 2.0;
+                    publish("선택 구간의 중간 프레임 추출 중... ("
+                            + TimeParser.formatSeconds(previewSeconds) + ")");
+                    return FrameExtractor.captureFrameAtSeconds(
+                            tempVideo, previewSeconds, currentRoi);
+                }
+                if (startSeconds > 0) {
+                    publish("지정한 시작 시각의 프레임 추출 중...");
+                    return FrameExtractor.captureFrameAtSeconds(
+                            tempVideo, startSeconds, currentRoi);
+                }
                 publish("중간 프레임 추출 중...");
                 return FrameExtractor.captureFrame(tempVideo, 0.5, currentRoi);
             }
@@ -349,6 +459,16 @@ public class GuiApp {
             return;
         }
 
+        final double[] extractionRange;
+        try {
+            extractionRange = readExtractionRange();
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(frame, e.getMessage(), "추출 구간 확인", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        final double startSeconds = extractionRange[0];
+        final double endSeconds = extractionRange[1];
+
         final String filename = filenameField.getText().trim();
         if (filename.isEmpty()) {
             JOptionPane.showMessageDialog(frame, "파일명을 입력해주세요.", "입력 필요", JOptionPane.WARNING_MESSAGE);
@@ -389,13 +509,16 @@ public class GuiApp {
         final Background bg     = currentBg;
         final Motion     motion = currentMotion;
 
-        appendLog("배경: " + bg.label + " | 진행: " + motion.label);
+        appendLog("배경: " + bg.label + " | 진행: " + motion.label
+                + " | 구간: " + TimeParser.formatSeconds(startSeconds)
+                + " ~ " + (endSeconds > 0 ? TimeParser.formatSeconds(endSeconds) : "끝까지"));
 
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
                 return VideoProcessor.process(url, finalFilename.replaceAll("\\.pdf$", ""),
-                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion);
+                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion,
+                    startSeconds, endSeconds);
             }
 
             @Override
@@ -471,8 +594,47 @@ public class GuiApp {
         convertButton.setEnabled(!busy);
         browseButton.setEnabled(!busy);
         urlField.setEnabled(!busy);
+        startMinuteCombo.setEnabled(!busy);
+        startSecondCombo.setEnabled(!busy);
+        endAtVideoEndCheckbox.setEnabled(!busy);
+        endMinuteCombo.setEnabled(!busy && !endAtVideoEndCheckbox.isSelected());
+        endSecondCombo.setEnabled(!busy && !endAtVideoEndCheckbox.isSelected());
         filenameField.setEnabled(!busy);
         folderField.setEnabled(!busy);
+    }
+
+    /** 시작/종료 입력을 초 단위로 변환하고 유효한 구간인지 확인한다. */
+    private double[] readExtractionRange() {
+        double startSeconds = selectedTime(startMinuteCombo, startSecondCombo);
+        double endSeconds = endAtVideoEndCheckbox.isSelected()
+                ? 0 : selectedTime(endMinuteCombo, endSecondCombo);
+        if (!endAtVideoEndCheckbox.isSelected() && endSeconds <= startSeconds)
+            throw new IllegalArgumentException("종료 시각은 시작 시각보다 뒤여야 합니다.");
+        return new double[] { startSeconds, endSeconds };
+    }
+
+    private JComboBox<String> createTimeCombo(int max) {
+        String[] values = new String[max + 1];
+        for (int i = 0; i <= max; i++)
+            values[i] = String.format("%02d", i);
+        JComboBox<String> combo = new JComboBox<>(values);
+        combo.setMaximumRowCount(10);
+        return combo;
+    }
+
+    private double selectedTime(
+            JComboBox<String> minuteCombo,
+            JComboBox<String> secondCombo
+    ) {
+        int minutes = Integer.parseInt((String) minuteCombo.getSelectedItem());
+        int seconds = Integer.parseInt((String) secondCombo.getSelectedItem());
+        return minutes * 60.0 + seconds;
+    }
+
+    private void updateEndTimeControls() {
+        boolean enabled = !endAtVideoEndCheckbox.isSelected();
+        endMinuteCombo.setEnabled(enabled);
+        endSecondCombo.setEnabled(enabled);
     }
 
     private void appendLog(String message) {
