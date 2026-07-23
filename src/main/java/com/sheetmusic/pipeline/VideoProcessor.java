@@ -23,6 +23,16 @@ public class VideoProcessor {
             String title,
             FrameExtractor.RoiConfig roi
     ) throws Exception {
+        return process(url, title, roi, 0);
+    }
+
+    /** CLI용. startSeconds부터 프레임 분석을 시작한다. */
+    public static String process(
+            String url,
+            String title,
+            FrameExtractor.RoiConfig roi,
+            double startSeconds
+    ) throws Exception {
         String safeTitle = sanitizeTitle(title);
         Path workDir   = Path.of(safeTitle);
         Path framesDir = workDir.resolve(Config.FRAMES_DIR);
@@ -31,7 +41,9 @@ public class VideoProcessor {
         Files.createDirectories(workDir);
 
         Path videoFile = YtDlpDownloader.download(url, workDir);
-        List<Path> frames = new FrameExtractor(roi).extract(videoFile, framesDir);
+        List<Path> frames = new FrameExtractor(
+                roi, Background.TRANSLUCENT, Motion.SCROLL, startSeconds)
+                .extract(videoFile, framesDir);
         PdfBuilder.build(frames, pdfPath);
 
         Files.deleteIfExists(videoFile);
@@ -49,7 +61,7 @@ public class VideoProcessor {
             javax.swing.SwingWorker<?, ?> worker
     ) throws Exception {
         return process(url, title, outputPdf, roi, logger, worker, null,
-                Background.TRANSLUCENT, Motion.SCROLL);
+                Background.TRANSLUCENT, Motion.SCROLL, 0);
     }
 
     /**
@@ -65,6 +77,25 @@ public class VideoProcessor {
             Path preDownloadedVideo,
             Background bg,
             Motion motion
+    ) throws Exception {
+        return process(url, title, outputPdf, roi, logger, worker,
+                preDownloadedVideo, bg, motion, 0);
+    }
+
+    /**
+     * GUI용. startSeconds부터 분석하며, 다운로드 캐시가 있으면 그대로 재사용한다.
+     */
+    public static String process(
+            String url,
+            String title,
+            Path outputPdf,
+            FrameExtractor.RoiConfig roi,
+            ProgressLogger logger,
+            javax.swing.SwingWorker<?, ?> worker,
+            Path preDownloadedVideo,
+            Background bg,
+            Motion motion,
+            double startSeconds
     ) throws Exception {
         if (logger == null) logger = ProgressLogger.console();
 
@@ -91,7 +122,8 @@ public class VideoProcessor {
             }
             checkCancellation(worker);
 
-            List<Path> frames = new FrameExtractor(roi, bg, motion).extract(videoFile, framesDir, log);
+            List<Path> frames = new FrameExtractor(roi, bg, motion, startSeconds)
+                    .extract(videoFile, framesDir, log);
             checkCancellation(worker);
 
             if (frames.isEmpty()) {

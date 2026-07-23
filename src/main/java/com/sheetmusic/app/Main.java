@@ -1,5 +1,6 @@
 package com.sheetmusic.app;
 
+import com.sheetmusic.common.TimeParser;
 import com.sheetmusic.download.YtDlpDownloader;
 import com.sheetmusic.pipeline.VideoProcessor;
 import com.sheetmusic.vision.FrameExtractor;
@@ -17,6 +18,7 @@ import java.util.List;
  *   java -jar youtube-to-pdf.jar <URL> [URL2] ...
  *   java -jar youtube-to-pdf.jar --file urls.txt
  *   java -jar youtube-to-pdf.jar --roi 0.65,1.00,0.00,1.00 <URL>
+ *   java -jar youtube-to-pdf.jar --start 00:15 <URL>
  */
 public class Main {
 
@@ -31,6 +33,7 @@ public class Main {
 
         List<String> urls = new ArrayList<>();
         FrameExtractor.RoiConfig roi = FrameExtractor.RoiConfig.defaultConfig();
+        double startSeconds = 0;
         String filePath = null;
 
         for (int i = 0; i < args.length; i++) {
@@ -44,6 +47,18 @@ public class Main {
                         try { roi = FrameExtractor.RoiConfig.parse(args[++i]); }
                         catch (Exception e) { System.err.println("[경고] ROI 형식이 올바르지 않습니다. 기본값을 사용합니다."); }
                     } else System.err.println("[경고] --roi 옵션 뒤에 설정값이 누락되었습니다.");
+                }
+                case "--start", "-s" -> {
+                    if (i + 1 >= args.length) {
+                        System.err.println("[오류] --start 옵션 뒤에 시작 시각이 필요합니다.");
+                        return;
+                    }
+                    try {
+                        startSeconds = TimeParser.parseSeconds(args[++i]);
+                    } catch (IllegalArgumentException e) {
+                        System.err.println("[오류] " + e.getMessage());
+                        return;
+                    }
                 }
                 case "--help", "-h" -> { printHelp(); return; }
                 default -> urls.add(args[i]);
@@ -74,7 +89,8 @@ public class Main {
             String url = urls.get(i);
             System.out.printf("%n[%d/%d] %s%n", i + 1, urls.size(), url);
             try {
-                String pdf = VideoProcessor.process(url, String.format("sheet_%02d", i + 1), roi);
+                String pdf = VideoProcessor.process(
+                        url, String.format("sheet_%02d", i + 1), roi, startSeconds);
                 System.out.println("완료: " + pdf);
                 success++;
             } catch (Exception e) {
@@ -97,12 +113,14 @@ public class Main {
                   java -jar youtube-to-pdf.jar <URL> [URL...]
                   java -jar youtube-to-pdf.jar --file urls.txt
                   java -jar youtube-to-pdf.jar --roi 0.65,1.00,0.00,1.00 <URL>
+                  java -jar youtube-to-pdf.jar --start 00:15 <URL>
 
                 옵션:
                   --file, -f <파일>           URL 목록 텍스트 파일
                   --roi, -r <top,bot,l,r>     악보 영역 비율 (기본: 0.70,1.00,0.00,1.00)
                                               하단 30%: 0.70,1.00,0.00,1.00
                                               전체화면: 0.00,1.00,0.00,1.00
+                  --start, -s <시각>           추출 시작 시각 (초, mm:ss, hh:mm:ss)
                   --help, -h                  이 도움말
 
                 ROI 조정 예시:

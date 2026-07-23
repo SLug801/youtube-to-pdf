@@ -1,5 +1,6 @@
 package com.sheetmusic.app;
 
+import com.sheetmusic.common.TimeParser;
 import com.sheetmusic.download.YtDlpDownloader;
 import com.sheetmusic.pipeline.VideoProcessor;
 import com.sheetmusic.vision.Background;
@@ -47,6 +48,7 @@ public class GuiApp {
 
     private JFrame frame;
     private JTextField urlField;
+    private JTextField startTimeField;
     private JTextField filenameField;
     private JTextField folderField;
     private JButton previewButton;
@@ -128,6 +130,14 @@ public class GuiApp {
         urlField = new JTextField();
         gbc.gridy = row++;
         panel.add(urlField, gbc);
+
+        gbc.gridy = row++;
+        panel.add(new JLabel("추출 시작 시각 (선택):"), gbc);
+
+        startTimeField = new JTextField("00:00");
+        startTimeField.setToolTipText("인트로를 제외할 시작 시각. 예: 15, 00:15, 1:02:30");
+        gbc.gridy = row++;
+        panel.add(startTimeField, gbc);
 
         previewButton = new JButton("프리뷰 불러오기");
         previewButton.addActionListener(e -> loadPreview());
@@ -283,6 +293,14 @@ public class GuiApp {
             return;
         }
 
+        final double previewStartSeconds;
+        try {
+            previewStartSeconds = TimeParser.parseSeconds(startTimeField.getText());
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(frame, e.getMessage(), "시작 시각 확인", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         setBusy(true);
         appendLog("프리뷰 로딩 중... 잠시만 기다려주세요.");
         previewPanel.clearImage();
@@ -301,6 +319,11 @@ public class GuiApp {
             protected BufferedImage doInBackground() throws Exception {
                 tempFolder = Files.createTempDirectory("ytpdf-preview-");
                 tempVideo  = YtDlpDownloader.download(url, tempFolder, this::publish);
+                if (previewStartSeconds > 0) {
+                    publish("지정한 시작 시각의 프레임 추출 중...");
+                    return FrameExtractor.captureFrameAtSeconds(
+                            tempVideo, previewStartSeconds, currentRoi);
+                }
                 publish("중간 프레임 추출 중...");
                 return FrameExtractor.captureFrame(tempVideo, 0.5, currentRoi);
             }
@@ -349,6 +372,14 @@ public class GuiApp {
             return;
         }
 
+        final double startSeconds;
+        try {
+            startSeconds = TimeParser.parseSeconds(startTimeField.getText());
+        } catch (IllegalArgumentException e) {
+            JOptionPane.showMessageDialog(frame, e.getMessage(), "시작 시각 확인", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         final String filename = filenameField.getText().trim();
         if (filename.isEmpty()) {
             JOptionPane.showMessageDialog(frame, "파일명을 입력해주세요.", "입력 필요", JOptionPane.WARNING_MESSAGE);
@@ -389,13 +420,14 @@ public class GuiApp {
         final Background bg     = currentBg;
         final Motion     motion = currentMotion;
 
-        appendLog("배경: " + bg.label + " | 진행: " + motion.label);
+        appendLog("배경: " + bg.label + " | 진행: " + motion.label
+                + " | 시작: " + TimeParser.formatSeconds(startSeconds));
 
         currentWorker = new SwingWorker<String, String>() {
             @Override
             protected String doInBackground() throws Exception {
                 return VideoProcessor.process(url, finalFilename.replaceAll("\\.pdf$", ""),
-                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion);
+                    outputPdf, currentRoi, this::publish, this, reuseVideo, bg, motion, startSeconds);
             }
 
             @Override
@@ -471,6 +503,7 @@ public class GuiApp {
         convertButton.setEnabled(!busy);
         browseButton.setEnabled(!busy);
         urlField.setEnabled(!busy);
+        startTimeField.setEnabled(!busy);
         filenameField.setEnabled(!busy);
         folderField.setEnabled(!busy);
     }

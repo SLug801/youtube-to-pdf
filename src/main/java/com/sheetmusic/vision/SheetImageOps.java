@@ -99,6 +99,48 @@ class SheetImageOps {
         return out;
     }
 
+    /**
+     * 화면 전환 모드에서 프레임이 실제 악보 띠인지 확인한다.
+     * 긴 수평선을 열기 연산으로 남긴 뒤 서로 떨어진 오선 행이 2개 이상인지 검사해,
+     * 드럼 인트로·타이틀 카드·구독 화면을 악보 페이지로 오인하지 않게 한다.
+     */
+    boolean hasSheetStructure(Mat colorSrc) {
+        return sheetLineGroups(colorSrc) >= 2;
+    }
+
+    private int sheetLineGroups(Mat colorSrc) {
+        Mat gray = new Mat();
+        Imgproc.cvtColor(colorSrc, gray, Imgproc.COLOR_BGR2GRAY);
+        if (Core.mean(gray).val[0] < 110) Core.bitwise_not(gray, gray);
+
+        Mat ink = new Mat();
+        Imgproc.adaptiveThreshold(gray, ink, 255,
+                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV,
+                OPAQUE_BLOCK, OPAQUE_C);
+        gray.release();
+
+        int minLineLength = Math.max(30, colorSrc.cols() / 3);
+        Mat horizontalKernel = Imgproc.getStructuringElement(
+                Imgproc.MORPH_RECT, new Size(minLineLength, 1));
+        Mat horizontal = new Mat();
+        Imgproc.morphologyEx(ink, horizontal, Imgproc.MORPH_OPEN, horizontalKernel);
+        ink.release();
+        horizontalKernel.release();
+
+        int minPixelsPerRow = Math.max(20, colorSrc.cols() / 4);
+        int lineGroups = 0;
+        boolean insideLine = false;
+        for (int y = 0; y < horizontal.rows(); y++) {
+            Mat row = horizontal.row(y);
+            boolean line = Core.countNonZero(row) >= minPixelsPerRow;
+            row.release();
+            if (line && !insideLine) lineGroups++;
+            insideLine = line;
+        }
+        horizontal.release();
+        return lineGroups;
+    }
+
     // ── 불투명(OPAQUE) 모드 ──────────────────────────────────────────────────
     // 흰 배경 + 검정 악보(이미 깨끗한 스캔/PDF형). 단순 이진화로 또렷하게 만든다.
     // 반투명/투명과 달리 배경 억제용 모폴로지가 거의 필요 없다.

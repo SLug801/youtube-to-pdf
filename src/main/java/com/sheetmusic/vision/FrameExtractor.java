@@ -62,11 +62,6 @@ public class FrameExtractor {
 
     // 스캔/스티칭 튜닝 상수는 ScanParams로 분리(아래 static import). 값별 조정 근거는 그곳 주석 참조.
 
-    // [테스트] 영상의 [시작초, 끝초] 구간만 처리(빠른 실영상 확인용). 둘 다 0이면 전체.
-    // 예: 2분대 장면 보려면 START=110, END=150.
-    private static final double TEST_START_SECONDS = 0;
-    private static final double TEST_END_SECONDS   = 0;
-
     public record RoiConfig(
             double topRatio, double bottomRatio,
             double leftRatio, double rightRatio) {
@@ -92,16 +87,24 @@ public class FrameExtractor {
     private final RoiConfig    roi;
     private final Background    bg;      // 배경 종류 → 특징 추출·출력 정리 결정
     private final Motion        motion;  // 진행 방식 → 스티칭 전략 결정
+    private final double        startSeconds;
     private final SheetImageOps imageOps;
 
     public FrameExtractor(RoiConfig roi) {
-        this(roi, Background.TRANSLUCENT, Motion.SCROLL);
+        this(roi, Background.TRANSLUCENT, Motion.SCROLL, 0);
     }
 
     public FrameExtractor(RoiConfig roi, Background bg, Motion motion) {
+        this(roi, bg, motion, 0);
+    }
+
+    public FrameExtractor(RoiConfig roi, Background bg, Motion motion, double startSeconds) {
+        if (!Double.isFinite(startSeconds) || startSeconds < 0)
+            throw new IllegalArgumentException("추출 시작 시각은 0초 이상이어야 합니다.");
         this.roi    = roi;
         this.bg     = (bg     != null) ? bg     : Background.TRANSLUCENT;
         this.motion = (motion != null) ? motion : Motion.SCROLL;
+        this.startSeconds = startSeconds;
         this.imageOps = new SheetImageOps(this.bg);
     }
 
@@ -123,6 +126,13 @@ public class FrameExtractor {
                     ? (long)(totalFrames / fps * 1_000_000L) : 0;
             }
             double durationSec = lengthUs / 1_000_000.0;
+            long startUs = Math.round(startSeconds * 1_000_000.0);
+            if (lengthUs > 0 && startUs >= lengthUs) {
+                throw new IllegalArgumentException(String.format(
+                        "추출 시작 시각(%.1f초)이 영상 길이(%.1f초)보다 깁니다.",
+                        startSeconds, durationSec));
+            }
+            long scanLengthUs = lengthUs > 0 ? lengthUs - startUs : 0;
             int    width   = grabber.getImageWidth();
             int    height  = grabber.getImageHeight();
             Rect   roiRect = makeRoiRect(width, height);
@@ -140,6 +150,10 @@ public class FrameExtractor {
                 width, height, fps, durationSec, scanFps, frameSkip);
             log(logger, "[설정] 배경=%s | 진행=%s | ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
                 bg.label, motion.label, roi, tw, MIN_SCORE, STABLE_SCORE);
+            if (startUs > 0) {
+                log(logger, "[구간] 영상 %.1f초부터 추출", startSeconds);
+                grabber.setTimestamp(startUs);
+            }
 
             StreamingRowWriter rowWriter = new StreamingRowWriter(roiW, roiH, outDir, logger);
             try {
@@ -160,11 +174,6 @@ public class FrameExtractor {
             long startMs   = System.currentTimeMillis();
             int  lastDx = 0; double lastScore = 0;
 
-            if (TEST_START_SECONDS > 0) {     // 테스트: 지정 시작 지점으로 한 번만 seek
-                grabber.setTimestamp((long) (TEST_START_SECONDS * 1_000_000L));
-                log(logger, "[테스트] %.0f~%.0f초 구간만 처리", TEST_START_SECONDS, TEST_END_SECONDS);
-            }
-
             while (true) {
                 if (Thread.currentThread().isInterrupted())
                     throw new InterruptedException("취소됨");
@@ -173,7 +182,6 @@ public class FrameExtractor {
                 if (videoFrame == null) break;
                 if (grabbedFrames++ % frameSkip != 0) continue;   // 검사 대상이 아닌 프레임은 디코딩만 하고 건너뜀
                 currentUs = grabber.getTimestamp();
-                if (TEST_END_SECONDS > 0 && currentUs > TEST_END_SECONDS * 1_000_000L) break;  // 테스트: 끝초 도달
 
                 Mat frame = frameToMat(videoFrame, converter);
                 if (frame.empty()) { sampleIdx++; continue; }
@@ -184,7 +192,8 @@ public class FrameExtractor {
 
                 if (!started) {
                     double cr = (double) Core.countNonZero(feat) / feat.total();
-                    if (cr < CONTENT_MIN) {                 // 인트로(빈 화면) 스킵
+                    boolean sheetFrame = motion != Motion.CUT || imageOps.hasSheetStructure(roiColor);
+                    if (cr < CONTENT_MIN || !sheetFrame) {  // 인트로·비악보 화면 스킵
                         feat.release(); roiColor.release();
                         sampleIdx++;
                         continue;
@@ -208,13 +217,17 @@ public class FrameExtractor {
                     // 서브마디 정합(dx 측정)은 마디 주기성에 속아 누락/중복이 난다(실측 확인).
                     // 대신 "확정 페이지와 충분히 달라지고(전환) + 직전 프레임과 같아짐(안정)"이면
                     // 새 페이지를 통째로 한 행으로 붙인다 — 경계의 얇은 슬리버만 겹치고 누락은 없다.
-                    double simConf = matchOffset(comFeat,  feat, tw, TPL_INSET)[2]; // 확정페이지와 dx=0 상관
-                    double simLast = matchOffset(lastFeat, feat, tw, TPL_INSET)[2]; // 직전프레임과 dx=0 상관
+                    // 화면 전환 판정은 왼쪽 템플릿 일부가 아니라 ROI 전체를 비교한다.
+                    // 반복 리듬 페이지는 왼쪽 15%가 거의 같아도 뒤쪽 마디가 다르므로,
+                    // 전체 폭을 사용해야 중간 페이지를 같은 화면으로 오인하지 않는다.
+                    double simConf = sameScreenScore(comFeat, feat);
+                    double simLast = sameScreenScore(lastFeat, feat);
                     lastDx = 0; lastScore = simConf;
                     boolean changed = simConf < CUT_SAME_SCREEN;    // 확정 페이지와 달라짐 = 전환됨
                     boolean stable  = simLast >= CUT_STABLE; // 직전과 동일 = 전환 끝나 안정
+                    boolean sheetFrame = !changed || !stable || imageOps.hasSheetStructure(roiColor);
 
-                    if (changed && stable) {
+                    if (changed && stable && sheetFrame) {
                         // 새 페이지 확정. 기본은 통째 붙이기(누락 0). 단, 확정 페이지와의 겹침이
                         // "확실"할 때만 겹친 만큼 잘라 중복을 없앤다(애매하면 통째 = 중복 감수).
                         double[] m  = matchOffset(comFeat, feat, tw, TPL_INSET);
@@ -243,6 +256,9 @@ public class FrameExtractor {
                         pageCnt++;
                         if (trustOverlap) trimCnt++;
                         scrolled = true;
+                        log(logger, "[화면 확정] t=%.1fs | confirmed=%.2f stable=%.2f%s",
+                            currentUs / 1_000_000.0, simConf, simLast,
+                            trustOverlap ? String.format(" | trim=%dpx", roiW - appendedW) : "");
                     } else if (!scrolled && !changed) {
                         // 첫 페이지 전 정지 구간 → 또렷한 최신 프레임으로 시드 교체(흐린 첫 프레임 방지)
                         rowWriter.replaceSeed(roiColor);
@@ -330,7 +346,8 @@ public class FrameExtractor {
                 feat.release(); roiColor.release();
 
                 if (sampleIdx > 0 && sampleIdx % (scanFps * 8) == 0) {
-                    double pct     = lengthUs > 0 ? (double) currentUs / lengthUs * 100 : -1;
+                    double pct     = scanLengthUs > 0
+                            ? (double) Math.max(0, currentUs - startUs) / scanLengthUs * 100 : -1;
                     long   elapsed = (System.currentTimeMillis() - startMs) / 1000;
                     log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | %s",
                         Math.max(pct, 0), elapsed, canvasW, lastDx, lastScore,
@@ -401,6 +418,16 @@ public class FrameExtractor {
         double zero = res.get(0, tx)[0];
         rg.release(); cg.release(); tpl.release(); res.release();
         return new double[]{ (int) mmr.maxLoc.x - tx, mmr.maxVal, zero };
+    }
+
+    /** 같은 크기의 두 화면 전체에 대한 정규화 상관. 화면 전환(CUT) 판정 전용. */
+    private double sameScreenScore(Mat confirmed, Mat current) {
+        if (confirmed.rows() != current.rows() || confirmed.cols() != current.cols()) return -1;
+        Mat result = new Mat();
+        Imgproc.matchTemplate(confirmed, current, result, Imgproc.TM_CCOEFF_NORMED);
+        double score = result.get(0, 0)[0];
+        result.release();
+        return score;
     }
 
     /**
@@ -573,29 +600,57 @@ public class FrameExtractor {
         try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath.toString())) {
             grabber.start();
 
-            long lengthUs = grabber.getLengthInTime();
-            if (lengthUs <= 0) {
-                int totalFrames = grabber.getLengthInFrames();
-                double fps = grabber.getFrameRate();
-                lengthUs = (fps > 0 && totalFrames > 0)
-                    ? (long)(totalFrames / fps * 1_000_000L) : 30_000_000L;
-            }
+            long lengthUs = videoLengthUs(grabber);
             long posUs = (long)(lengthUs * positionRatio);
-            grabber.setTimestamp(posUs);
-            Frame videoFrame = grabber.grabImage();
-            if (videoFrame == null) throw new IllegalStateException("프레임 읽기 실패");
-
-            Mat frame = frameToMat(videoFrame, new Java2DFrameConverter());
-
-            MatOfByte buf = new MatOfByte();
-            Imgcodecs.imencode(".png", frame, buf);
-            BufferedImage img;
-            try (ByteArrayInputStream in = new ByteArrayInputStream(buf.toArray())) {
-                img = ImageIO.read(in);
-            }
-            frame.release();
-            return img;
+            return captureBufferedFrame(grabber, posUs);
         }
+    }
+
+    /** 영상 시작 기준 절대 시각의 프레임을 GUI ROI 프리뷰용 이미지로 반환한다. */
+    public static BufferedImage captureFrameAtSeconds(
+            Path videoPath, double seconds, RoiConfig roi) throws Exception {
+        if (!Double.isFinite(seconds) || seconds < 0)
+            throw new IllegalArgumentException("프리뷰 시각은 0초 이상이어야 합니다.");
+
+        try (FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(videoPath.toString())) {
+            grabber.start();
+            long lengthUs = videoLengthUs(grabber);
+            long posUs = Math.round(seconds * 1_000_000.0);
+            if (posUs >= lengthUs) {
+                throw new IllegalArgumentException(String.format(
+                        "프리뷰 시각(%.1f초)이 영상 길이(%.1f초)보다 깁니다.",
+                        seconds, lengthUs / 1_000_000.0));
+            }
+            return captureBufferedFrame(grabber, posUs);
+        }
+    }
+
+    private static long videoLengthUs(FFmpegFrameGrabber grabber) {
+        long lengthUs = grabber.getLengthInTime();
+        if (lengthUs > 0) return lengthUs;
+
+        int totalFrames = grabber.getLengthInFrames();
+        double fps = grabber.getFrameRate();
+        return (fps > 0 && totalFrames > 0)
+                ? (long)(totalFrames / fps * 1_000_000L) : 30_000_000L;
+    }
+
+    private static BufferedImage captureBufferedFrame(FFmpegFrameGrabber grabber, long posUs)
+            throws Exception {
+        grabber.setTimestamp(posUs);
+        Frame videoFrame = grabber.grabImage();
+        if (videoFrame == null) throw new IllegalStateException("프레임 읽기 실패");
+
+        Mat frame = frameToMat(videoFrame, new Java2DFrameConverter());
+        MatOfByte buf = new MatOfByte();
+        Imgcodecs.imencode(".png", frame, buf);
+        BufferedImage img;
+        try (ByteArrayInputStream in = new ByteArrayInputStream(buf.toArray())) {
+            img = ImageIO.read(in);
+        }
+        buf.release();
+        frame.release();
+        return img;
     }
 
     private static void log(ProgressLogger logger, String fmt, Object... args) {
