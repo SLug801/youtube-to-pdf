@@ -16,10 +16,11 @@ public class StitchTest {
         double top    = (args.length > 1) ? Double.parseDouble(args[1]) : 0.80;
         double bottom = (args.length > 2) ? Double.parseDouble(args[2]) : 1.00;
         double start  = (args.length > 3) ? Double.parseDouble(args[3]) : 0;
+        double end    = (args.length > 5) ? Double.parseDouble(args[5]) : 0;
 
         FrameExtractor.RoiConfig roi =
             new FrameExtractor.RoiConfig(top, bottom, 0.00, 1.00);
-        FrameExtractor fx = new FrameExtractor(roi, Background.OPAQUE, Motion.CUT, start);
+        FrameExtractor fx = new FrameExtractor(roi, Background.OPAQUE, Motion.CUT, start, end);
 
         Path outDir = Path.of((args.length > 4) ? args[4] : "stitchout");
         List<Path> frames = fx.extract(Path.of(video), outDir, ProgressLogger.console());

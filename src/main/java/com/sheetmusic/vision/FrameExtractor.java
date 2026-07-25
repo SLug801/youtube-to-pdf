@@ -88,23 +88,39 @@ public class FrameExtractor {
     private final Background    bg;      // 배경 종류 → 특징 추출·출력 정리 결정
     private final Motion        motion;  // 진행 방식 → 스티칭 전략 결정
     private final double        startSeconds;
+    private final double        endSeconds; // 0이면 영상 끝까지
     private final SheetImageOps imageOps;
 
     public FrameExtractor(RoiConfig roi) {
-        this(roi, Background.TRANSLUCENT, Motion.SCROLL, 0);
+        this(roi, Background.TRANSLUCENT, Motion.SCROLL, 0, 0);
     }
 
     public FrameExtractor(RoiConfig roi, Background bg, Motion motion) {
-        this(roi, bg, motion, 0);
+        this(roi, bg, motion, 0, 0);
     }
 
     public FrameExtractor(RoiConfig roi, Background bg, Motion motion, double startSeconds) {
+        this(roi, bg, motion, startSeconds, 0);
+    }
+
+    public FrameExtractor(
+            RoiConfig roi,
+            Background bg,
+            Motion motion,
+            double startSeconds,
+            double endSeconds
+    ) {
         if (!Double.isFinite(startSeconds) || startSeconds < 0)
             throw new IllegalArgumentException("추출 시작 시각은 0초 이상이어야 합니다.");
+        if (!Double.isFinite(endSeconds) || endSeconds < 0)
+            throw new IllegalArgumentException("추출 종료 시각은 0초 이상이어야 합니다.");
+        if (endSeconds > 0 && endSeconds <= startSeconds)
+            throw new IllegalArgumentException("추출 종료 시각은 시작 시각보다 뒤여야 합니다.");
         this.roi    = roi;
         this.bg     = (bg     != null) ? bg     : Background.TRANSLUCENT;
         this.motion = (motion != null) ? motion : Motion.SCROLL;
         this.startSeconds = startSeconds;
+        this.endSeconds = endSeconds;
         this.imageOps = new SheetImageOps(this.bg);
     }
 
@@ -127,12 +143,17 @@ public class FrameExtractor {
             }
             double durationSec = lengthUs / 1_000_000.0;
             long startUs = Math.round(startSeconds * 1_000_000.0);
-            if (lengthUs > 0 && startUs >= lengthUs) {
+            long requestedEndUs = endSeconds > 0
+                    ? Math.round(endSeconds * 1_000_000.0) : lengthUs;
+            long scanEndUs = requestedEndUs;
+            if (lengthUs > 0 && (scanEndUs <= 0 || scanEndUs > lengthUs))
+                scanEndUs = lengthUs;
+            if (scanEndUs > 0 && startUs >= scanEndUs) {
                 throw new IllegalArgumentException(String.format(
                         "추출 시작 시각(%.1f초)이 영상 길이(%.1f초)보다 깁니다.",
                         startSeconds, durationSec));
             }
-            long scanLengthUs = lengthUs > 0 ? lengthUs - startUs : 0;
+            long scanLengthUs = scanEndUs > 0 ? scanEndUs - startUs : 0;
             int    width   = grabber.getImageWidth();
             int    height  = grabber.getImageHeight();
             Rect   roiRect = makeRoiRect(width, height);
@@ -150,8 +171,14 @@ public class FrameExtractor {
                 width, height, fps, durationSec, scanFps, frameSkip);
             log(logger, "[설정] 배경=%s | 진행=%s | ROI=%s | 템플릿=%dpx | 임계 match=%.2f stable=%.2f",
                 bg.label, motion.label, roi, tw, MIN_SCORE, STABLE_SCORE);
+            log(logger, "[구간] %.1f초 ~ %s", startSeconds,
+                endSeconds > 0 ? String.format("%.1f초", scanEndUs / 1_000_000.0)
+                               : "영상 끝");
+            if (endSeconds > 0 && lengthUs > 0 && requestedEndUs > lengthUs) {
+                log(logger, "[안내] 종료 시각이 영상 길이를 넘어 실제 끝 시각(%.1f초)까지만 처리합니다.",
+                    durationSec);
+            }
             if (startUs > 0) {
-                log(logger, "[구간] 영상 %.1f초부터 추출", startSeconds);
                 grabber.setTimestamp(startUs);
             }
 
@@ -180,8 +207,10 @@ public class FrameExtractor {
 
                 Frame videoFrame = grabber.grabImage();
                 if (videoFrame == null) break;
-                if (grabbedFrames++ % frameSkip != 0) continue;   // 검사 대상이 아닌 프레임은 디코딩만 하고 건너뜀
                 currentUs = grabber.getTimestamp();
+                if (currentUs < startUs) continue; // seek가 앞쪽 키프레임으로 이동한 경우 구간 밖 프레임 제외
+                if (scanEndUs > 0 && currentUs > scanEndUs) break;
+                if (grabbedFrames++ % frameSkip != 0) continue;   // 검사 대상이 아닌 프레임은 디코딩만 하고 건너뜀
 
                 Mat frame = frameToMat(videoFrame, converter);
                 if (frame.empty()) { sampleIdx++; continue; }
@@ -350,7 +379,7 @@ public class FrameExtractor {
                             ? (double) Math.max(0, currentUs - startUs) / scanLengthUs * 100 : -1;
                     long   elapsed = (System.currentTimeMillis() - startMs) / 1000;
                     log(logger, "  진행 %.0f%% (%ds) 폭=%dpx | dx=%d score=%.2f | %s",
-                        Math.max(pct, 0), elapsed, canvasW, lastDx, lastScore,
+                        Math.min(100, Math.max(pct, 0)), elapsed, canvasW, lastDx, lastScore,
                         counts(scrollCnt, pageCnt, staticCnt, rejectCnt, trimCnt));
                 }
 

@@ -19,6 +19,7 @@ import java.util.List;
  *   java -jar youtube-to-pdf.jar --file urls.txt
  *   java -jar youtube-to-pdf.jar --roi 0.65,1.00,0.00,1.00 <URL>
  *   java -jar youtube-to-pdf.jar --start 00:15 <URL>
+ *   java -jar youtube-to-pdf.jar --start 00:15 --end 04:45 <URL>
  */
 public class Main {
 
@@ -34,6 +35,8 @@ public class Main {
         List<String> urls = new ArrayList<>();
         FrameExtractor.RoiConfig roi = FrameExtractor.RoiConfig.defaultConfig();
         double startSeconds = 0;
+        double endSeconds = 0;
+        boolean endSpecified = false;
         String filePath = null;
 
         for (int i = 0; i < args.length; i++) {
@@ -60,9 +63,27 @@ public class Main {
                         return;
                     }
                 }
+                case "--end", "-e" -> {
+                    if (i + 1 >= args.length) {
+                        System.err.println("[오류] --end 옵션 뒤에 종료 시각이 필요합니다.");
+                        return;
+                    }
+                    try {
+                        endSeconds = TimeParser.parseSeconds(args[++i]);
+                        endSpecified = true;
+                    } catch (IllegalArgumentException e) {
+                        System.err.println("[오류] " + e.getMessage());
+                        return;
+                    }
+                }
                 case "--help", "-h" -> { printHelp(); return; }
                 default -> urls.add(args[i]);
             }
+        }
+
+        if (endSpecified && endSeconds <= startSeconds) {
+            System.err.println("[오류] 추출 종료 시각은 시작 시각보다 뒤여야 합니다.");
+            return;
         }
 
         if (filePath != null) {
@@ -90,7 +111,7 @@ public class Main {
             System.out.printf("%n[%d/%d] %s%n", i + 1, urls.size(), url);
             try {
                 String pdf = VideoProcessor.process(
-                        url, String.format("sheet_%02d", i + 1), roi, startSeconds);
+                        url, String.format("sheet_%02d", i + 1), roi, startSeconds, endSeconds);
                 System.out.println("완료: " + pdf);
                 success++;
             } catch (Exception e) {
@@ -114,6 +135,7 @@ public class Main {
                   java -jar youtube-to-pdf.jar --file urls.txt
                   java -jar youtube-to-pdf.jar --roi 0.65,1.00,0.00,1.00 <URL>
                   java -jar youtube-to-pdf.jar --start 00:15 <URL>
+                  java -jar youtube-to-pdf.jar --start 00:15 --end 04:45 <URL>
 
                 옵션:
                   --file, -f <파일>           URL 목록 텍스트 파일
@@ -121,6 +143,7 @@ public class Main {
                                               하단 30%: 0.70,1.00,0.00,1.00
                                               전체화면: 0.00,1.00,0.00,1.00
                   --start, -s <시각>           추출 시작 시각 (초, mm:ss, hh:mm:ss)
+                  --end, -e <시각>             추출 종료 시각 (생략하면 영상 끝까지)
                   --help, -h                  이 도움말
 
                 ROI 조정 예시:

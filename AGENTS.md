@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-이 파일은 Claude Code(및 에이전트)가 이 저장소에서 작업할 때 참고하는 프로젝트 컨텍스트입니다.
+이 파일은 에이전트가 이 저장소에서 작업할 때 참고하는 프로젝트 컨텍스트입니다.
 사용자 문서는 [README.md](README.md)에 더 자세히 있습니다. 여기엔 **빌드/실행/규칙/주의점**만 압축합니다.
 
 ## 프로젝트 한 줄 요약
@@ -32,6 +32,7 @@ run.bat
 java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>" ["<URL2>" ...]
 java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
 java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 "<URL>"
+java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end 04:45 "<URL>"
 
 # 개발용 단발 테스트 클래스(JUnit 아님, main 메서드 직접 실행)
 #   StitchTest      : 로컬 영상에 스티칭(불투명+화면전환) 적용 → stitchout.pdf
