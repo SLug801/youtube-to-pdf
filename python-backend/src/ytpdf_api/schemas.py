@@ -127,10 +127,8 @@ class PreviewRequest(ApiModel):
 
 class EngineStatus(ApiModel):
     ready: bool
-    jar_path: str
-    java_command: str
     message: str
-    kind: Literal["python", "java"] = "java"
+    kind: Literal["python"] = "python"
     engine_path: str | None = None
 
 

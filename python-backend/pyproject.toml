@@ -31,6 +31,7 @@ dev = [
 
 [project.scripts]
 ytpdf-api = "ytpdf_api.__main__:main"
+ytpdf = "ytpdf_api.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ytpdf_api", "src/ytpdf_core"]

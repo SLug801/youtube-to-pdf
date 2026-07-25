@@ -1,44 +1,11 @@
 import sys
 from pathlib import Path
 
-from ytpdf_api.engine import JavaEngine, PythonEngine
+import ytpdf_api.worker
+from ytpdf_api.engine import PythonEngine
 from ytpdf_api.schemas import ConversionRequest
 from ytpdf_api.settings import Settings
-
-
-def test_java_engine_builds_existing_cli_contract(tmp_path: Path) -> None:
-    jar = tmp_path / "backend.jar"
-    yt_dlp = tmp_path / "yt-dlp"
-    jar.touch()
-    yt_dlp.touch()
-    request = ConversionRequest(
-        url="https://www.youtube.com/watch?v=test",
-        outputDirectory=tmp_path,
-        start="00:15",
-        end="04:45",
-    )
-    engine = JavaEngine(
-        Settings(
-            jar_path=jar,
-            java_command="/usr/bin/java",
-            yt_dlp_path=yt_dlp,
-        )
-    )
-
-    assert engine.command(request) == [
-        "/usr/bin/java",
-        "-Djna.nosys=true",
-        "-Djna.protected=true",
-        "-Dfile.encoding=UTF-8",
-        f"-Dytpdf.ytdlp={yt_dlp}",
-        "-jar",
-        str(jar),
-        "--start",
-        "00:15",
-        "--end",
-        "04:45",
-        "https://www.youtube.com/watch?v=test",
-    ]
+from ytpdf_api.worker import run_cli
 
 
 def test_python_engine_builds_worker_contract(tmp_path: Path) -> None:
@@ -67,3 +34,33 @@ def test_python_engine_builds_worker_contract(tmp_path: Path) -> None:
         "00:15",
         "https://www.youtube.com/watch?v=test",
     ]
+
+
+def test_python_cli_converts_with_current_directory_default(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_convert_url(url: str, output_directory: Path, **options: object) -> Path:
+        captured.update(url=url, output_directory=output_directory, options=options)
+        return output_directory / "sheet_01" / "sheet_01.pdf"
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ytpdf_api.worker, "convert_url", fake_convert_url)
+
+    assert run_cli(
+        [
+            "--start",
+            "00:15",
+            "--roi",
+            "0.60,1.00,0.00,1.00",
+            "--background",
+            "opaque",
+            "--motion",
+            "cut",
+            "https://www.youtube.com/watch?v=test",
+        ]
+    ) == 0
+    assert captured["url"] == "https://www.youtube.com/watch?v=test"
+    assert captured["output_directory"] == tmp_path

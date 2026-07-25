@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request,
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from ytpdf_api.engine import ConversionEngine, JavaEngine, PythonEngine
+from ytpdf_api.engine import ConversionEngine, PythonEngine
 from ytpdf_api.jobs import EngineUnavailableError, JobConflictError, JobManager
 from ytpdf_api.previews import generate_preview
 from ytpdf_api.schemas import (
@@ -27,14 +27,7 @@ VERSION = "0.1.0"
 
 
 def create_engine(settings: Settings) -> ConversionEngine:
-    if settings.engine_mode == "java":
-        return JavaEngine(settings)
-    if settings.engine_mode == "python":
-        return PythonEngine(settings)
-    if settings.engine_mode == "auto":
-        python_engine = PythonEngine(settings)
-        return python_engine if python_engine.status().ready else JavaEngine(settings)
-    raise ValueError("YTPDF_ENGINE은 python, java 또는 auto여야 합니다.")
+    return PythonEngine(settings)
 
 
 def get_settings(request: Request) -> Settings:

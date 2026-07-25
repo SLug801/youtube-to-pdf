@@ -1,7 +1,5 @@
 export interface BackendStatus {
   ready: boolean;
-  jarPath: string;
-  javaCommand: string;
   message: string;
 }
 

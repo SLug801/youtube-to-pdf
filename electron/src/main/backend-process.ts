@@ -16,7 +16,6 @@ import type {
   RoiPreview,
 } from '../shared/contracts';
 
-const BACKEND_JAR = 'youtube-to-pdf-1.0.0-shaded.jar';
 const API_EXECUTABLE = process.platform === 'win32' ? 'ytpdf-api.exe' : 'ytpdf-api';
 const API_HOST = '127.0.0.1';
 const MAX_PREVIEW_BYTES = 12 * 1024 * 1024;
@@ -27,8 +26,6 @@ function isFile(candidate: string): boolean {
 
 interface BackendPaths {
   root: string;
-  jar: string;
-  java: string;
   ytDlp?: string;
   apiCommand: string;
   apiArgs: string[];
@@ -40,10 +37,8 @@ interface ApiHealth {
   version: string;
   engine: {
     ready: boolean;
-    kind: 'python' | 'java';
+    kind: 'python';
     enginePath: string | null;
-    jarPath: string;
-    javaCommand: string;
     message: string;
   };
 }
@@ -86,18 +81,13 @@ export class BackendProcess {
       const health = await this.requestJson<ApiHealth>('/health');
       return {
         ready: health.engine.ready,
-        jarPath: health.engine.jarPath,
-        javaCommand: health.engine.javaCommand,
         message: health.engine.ready
-          ? `FastAPI ${health.version} · ${health.engine.kind === 'python' ? 'Python' : 'Java'} Worker 준비됨`
+          ? `FastAPI ${health.version} · Python Worker 준비됨`
           : health.engine.message,
       };
     } catch (reason) {
-      const paths = this.resolvePaths();
       return {
         ready: false,
-        jarPath: paths.jar,
-        javaCommand: paths.java,
         message: reason instanceof Error ? reason.message : String(reason),
       };
     }
@@ -245,8 +235,6 @@ export class BackendProcess {
         YTPDF_API_HOST: API_HOST,
         YTPDF_API_PORT: String(port),
         YTPDF_API_TOKEN: token,
-        YTPDF_JAR_PATH: paths.jar,
-        YTPDF_JAVA_COMMAND: paths.java,
         ...(paths.ytDlp ? { YTPDF_YTDLP_PATH: paths.ytDlp } : {}),
       },
       windowsHide: true,
@@ -422,12 +410,6 @@ export class BackendProcess {
       : path.resolve(app.getAppPath(), '..', 'backend');
     const pythonProject = path.resolve(app.getAppPath(), '..', 'python-backend');
 
-    const bundledJava = path.join(
-      root,
-      'runtime',
-      'bin',
-      process.platform === 'win32' ? 'java.exe' : 'java',
-    );
     const ytDlpNames =
       process.platform === 'win32' ? ['yt-dlp.exe', 'yt-dlp'] : ['yt-dlp'];
     const ytDlp = ytDlpNames
@@ -460,8 +442,6 @@ export class BackendProcess {
 
     return {
       root,
-      jar: path.join(root, app.isPackaged ? BACKEND_JAR : `build/libs/${BACKEND_JAR}`),
-      java: isFile(bundledJava) ? bundledJava : 'java',
       ytDlp,
       apiCommand,
       apiArgs,

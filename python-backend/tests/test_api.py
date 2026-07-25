@@ -19,8 +19,6 @@ class FakeEngine:
     def status(self) -> EngineStatus:
         return EngineStatus(
             ready=True,
-            jarPath="/tmp/fake.jar",
-            javaCommand=sys.executable,
             message="테스트 엔진 준비됨",
         )
 
@@ -50,7 +48,7 @@ def wait_for_terminal(client: TestClient, job_id: str) -> dict[str, object]:
 
 
 def test_health_requires_token(tmp_path: Path) -> None:
-    settings = Settings(api_token="test", jar_path=tmp_path / "missing.jar")
+    settings = Settings(api_token="test")
     app = create_app(settings, JobManager(FakeEngine()))
 
     with TestClient(app) as client:
@@ -77,7 +75,7 @@ def test_preview_requires_token_and_returns_jpeg(tmp_path: Path) -> None:
         writer.write(np.full((90, 160, 3), 220, dtype=np.uint8))
     writer.release()
 
-    settings = Settings(api_token="test", jar_path=tmp_path / "fake.jar")
+    settings = Settings(api_token="test")
     app = create_app(settings, JobManager(FakeEngine()))
     payload = {
         "url": "https://www.youtube.com/watch?v=test",
@@ -101,7 +99,7 @@ def test_preview_requires_token_and_returns_jpeg(tmp_path: Path) -> None:
 
 
 def test_job_runs_in_worker_process_and_exposes_result(tmp_path: Path) -> None:
-    settings = Settings(api_token="test", jar_path=tmp_path / "fake.jar")
+    settings = Settings(api_token="test")
     app = create_app(settings, JobManager(FakeEngine()))
     headers = {"X-YTPDF-Token": "test"}
 
@@ -137,7 +135,7 @@ def test_rejects_second_active_job(tmp_path: Path) -> None:
         def command(self, request: ConversionRequest) -> list[str]:
             return [sys.executable, "-c", "import time; time.sleep(10)"]
 
-    settings = Settings(api_token="test", jar_path=tmp_path / "fake.jar")
+    settings = Settings(api_token="test")
     app = create_app(settings, JobManager(SlowEngine()))
     headers = {"X-YTPDF-Token": "test"}
     payload = {
@@ -202,7 +200,7 @@ def test_api_runs_real_python_worker_to_pdf(tmp_path: Path) -> None:
             writer.write(frame)
     writer.release()
 
-    settings = Settings(api_token="test", engine_mode="python")
+    settings = Settings(api_token="test")
     app = create_app(settings, JobManager(PythonEngine(settings)))
     headers = {"X-YTPDF-Token": "test"}
     with TestClient(app) as client:

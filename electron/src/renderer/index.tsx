@@ -371,7 +371,7 @@ function App(): React.JSX.Element {
       </section>
 
       <footer>
-        Python OpenCV 엔진이 기본이며, YTPDF_ENGINE=java로 기존 엔진을 선택할 수 있습니다.
+        Python OpenCV Worker가 영상 분석과 PDF 생성을 전담합니다.
       </footer>
     </main>
   );
