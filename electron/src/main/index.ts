@@ -8,7 +8,11 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { BackendProcess } from './backend-process';
-import type { BackendEvent, ConversionRequest } from '../shared/contracts';
+import type {
+  BackendEvent,
+  ConversionRequest,
+  PreviewRequest,
+} from '../shared/contracts';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -46,33 +50,38 @@ function requireTrustedSender(event: IpcMainInvokeEvent): void {
   }
 }
 
-function validateRequest(value: unknown): ConversionRequest {
-  if (!value || typeof value !== 'object') {
-    throw new Error('변환 요청 형식이 올바르지 않습니다.');
-  }
-
-  const request = value as Partial<ConversionRequest>;
-  if (typeof request.url !== 'string' || request.url.length > 2048) {
+function validateUrl(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 2048) {
     throw new Error('URL을 확인해 주세요.');
   }
-
   let url: URL;
   try {
-    url = new URL(request.url);
+    url = new URL(value);
   } catch {
     throw new Error('올바른 URL을 입력해 주세요.');
   }
   if (!['https:', 'http:'].includes(url.protocol)) {
     throw new Error('HTTP 또는 HTTPS URL만 사용할 수 있습니다.');
   }
+  return url.toString();
+}
 
+function validateOutputDirectory(value: unknown): string {
   if (
-    typeof request.outputDirectory !== 'string'
-    || !fs.statSync(request.outputDirectory, { throwIfNoEntry: false })?.isDirectory()
+    typeof value !== 'string'
+    || !fs.statSync(value, { throwIfNoEntry: false })?.isDirectory()
   ) {
     throw new Error('출력 폴더를 다시 선택해 주세요.');
   }
+  return path.resolve(value);
+}
 
+function validateRequest(value: unknown): ConversionRequest {
+  if (!value || typeof value !== 'object') {
+    throw new Error('변환 요청 형식이 올바르지 않습니다.');
+  }
+
+  const request = value as Partial<ConversionRequest>;
   for (const [name, time] of [
     ['시작', request.start],
     ['종료', request.end],
@@ -96,13 +105,31 @@ function validateRequest(value: unknown): ConversionRequest {
   }
 
   return {
-    url: url.toString(),
-    outputDirectory: path.resolve(request.outputDirectory),
+    url: validateUrl(request.url),
+    outputDirectory: validateOutputDirectory(request.outputDirectory),
     start: request.start?.trim() || undefined,
     end: request.end?.trim() || undefined,
     roi,
     background,
     motion,
+  };
+}
+
+function validatePreviewRequest(value: unknown): PreviewRequest {
+  if (!value || typeof value !== 'object') {
+    throw new Error('프리뷰 요청 형식이 올바르지 않습니다.');
+  }
+  const request = value as Partial<PreviewRequest>;
+  if (
+    request.at !== undefined
+    && (typeof request.at !== 'string' || request.at.length > 20)
+  ) {
+    throw new Error('프리뷰 시각 형식이 올바르지 않습니다.');
+  }
+  return {
+    url: validateUrl(request.url),
+    outputDirectory: validateOutputDirectory(request.outputDirectory),
+    at: request.at?.trim() || undefined,
   };
 }
 
@@ -120,6 +147,11 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory'],
     });
     return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('backend:preview', (event, value: unknown) => {
+    requireTrustedSender(event);
+    return backend.preview(validatePreviewRequest(value));
   });
 
   ipcMain.handle('backend:start', async (event, value: unknown) => {

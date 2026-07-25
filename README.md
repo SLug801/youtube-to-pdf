@@ -164,7 +164,8 @@ Electron Main 프로세스가 인증 토큰과 임의의 loopback 포트로 Fast
 FastAPI가 별도 Python OpenCV Worker를 실행합니다. `YTPDF_ENGINE=java`를 지정하면
 `backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar`를 폴백 Worker로 실행합니다.
 현재 Electron 화면에는 URL·시작/종료 시각·출력 폴더·로그·취소 기능이 연결되어 있으며,
-ROI 프리뷰와 배경·진행 모드 선택은 순차 이식 중입니다.
+대표 프레임 위에서 ROI의 상·하·좌·우 경계를 조절하고 배경·진행 모드를 선택할 수 있습니다.
+프리뷰에 내려받은 영상은 실제 변환에서 재사용합니다.
 
 ### FastAPI 백엔드
 
@@ -181,8 +182,10 @@ uv run pytest
 YTPDF_API_TOKEN=development-token uv run ytpdf-api
 ```
 
-API는 `POST /api/v1/jobs`, 작업 조회·취소·SSE 이벤트·결과 다운로드를 제공합니다. 작업 요청에서
-`roi`, `background`(`translucent`/`opaque`), `motion`(`scroll`/`cut`)을 선택할 수 있습니다.
+API는 `POST /api/v1/preview`, `POST /api/v1/jobs`, 작업 조회·취소·SSE 이벤트·결과 다운로드를
+제공합니다. 프리뷰는 `url`, `outputDirectory`, 선택적인 `at` 시각을 받고 JPEG 대표 프레임을
+반환합니다. 작업 요청에서 `roi`, `background`(`translucent`/`opaque`),
+`motion`(`scroll`/`cut`)을 선택할 수 있습니다.
 자세한 내용은 [`python-backend/README.md`](python-backend/README.md)를 참고하세요.
 
 ### Java 백엔드

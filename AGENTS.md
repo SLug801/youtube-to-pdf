@@ -93,10 +93,11 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
 
 | 파일 | 역할 |
 |---|---|
-| `app.py` | 작업·상태·취소·SSE·결과 API |
+| `app.py` | 프리뷰·작업·상태·취소·SSE·결과 API |
 | `schemas.py` | Pydantic 요청·응답·이벤트 계약 |
 | `jobs.py` | 장시간 작업 상태와 자식 프로세스 수명주기 |
 | `engine.py` | 기본 Python Worker와 Java 폴백 Worker 어댑터 |
+| `previews.py` | OpenCV를 지연 로드하는 프리뷰 서비스 어댑터 |
 | `settings.py` | 환경 변수 기반 로컬 sidecar 설정 |
 
 ### Python 처리 코어 (`python-backend/src/ytpdf_core/`)
@@ -108,6 +109,7 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
 | `downloader.py` | yt-dlp 자식 프로세스 래퍼 |
 | `pdf_builder.py` | 스티칭 행을 A4 PDF로 배치 |
 | `pipeline.py` | 다운로드→추출→PDF 오케스트레이션 |
+| `preview.py` | ROI 설정용 대표 프레임 추출·JPEG 인코딩 |
 
 ## 코드 컨벤션
 - 패키지: `com.sheetmusic` 아래 역할별 서브패키지
@@ -130,6 +132,8 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
   Main에서 수행하고 Preload에는 용도별 메서드만 공개한다.
 - FastAPI route 안에서 영상 변환을 직접 실행하지 않는다. `JobManager`가 별도 Worker
   프로세스로 실행하며, 영상 처리 코어는 FastAPI에 의존하지 않게 유지한다.
+- ROI 프리뷰의 OpenCV·yt-dlp 처리는 이벤트 루프 밖 작업 스레드에서 실행하고 변환 작업과
+  동시에 실행하지 않는다. 이미지 바이트와 API 토큰은 Renderer가 아니라 Main이 처리한다.
 - 기본 엔진은 Python이며 `YTPDF_ENGINE=java`로 Java 폴백을 선택할 수 있다. Python/Java
   결과 차이는 합성 회귀 테스트와 실제 샘플 영상으로 비교한 뒤 튜닝 상수를 조정한다.
 - 로컬 API는 `127.0.0.1`의 임의 포트와 프로세스별 토큰을 사용한다. 토큰을 Renderer에

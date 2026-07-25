@@ -15,6 +15,19 @@ export interface ConversionRequest {
   motion?: 'scroll' | 'cut';
 }
 
+export interface PreviewRequest {
+  url: string;
+  outputDirectory: string;
+  at?: string;
+}
+
+export interface RoiPreview {
+  dataUrl: string;
+  width: number;
+  height: number;
+  timestampSeconds: number;
+}
+
 export type BackendEvent =
   | {
       type: 'started';
@@ -44,6 +57,7 @@ export interface ConversionResult {
 export interface ElectronApi {
   getBackendStatus(): Promise<BackendStatus>;
   selectOutputDirectory(): Promise<string | null>;
+  loadPreview(request: PreviewRequest): Promise<RoiPreview>;
   startConversion(request: ConversionRequest): Promise<ConversionResult>;
   cancelConversion(): Promise<boolean>;
   onBackendEvent(listener: (event: BackendEvent) => void): () => void;

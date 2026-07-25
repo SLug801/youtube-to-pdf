@@ -102,6 +102,29 @@ class ConversionRequest(ApiModel):
         return Path(self.output_directory).resolve()
 
 
+class PreviewRequest(ApiModel):
+    url: HttpUrl
+    output_directory: DirectoryPath
+    at: Annotated[str | None, Field(max_length=20)] = None
+
+    @field_validator("at")
+    @classmethod
+    def validate_at(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        parse_time_seconds(normalized)
+        return normalized
+
+    @property
+    def resolved_output_directory(self) -> Path:
+        return Path(self.output_directory).resolve()
+
+    @property
+    def at_seconds(self) -> float:
+        return parse_time_seconds(self.at) if self.at is not None else 5
+
+
 class EngineStatus(ApiModel):
     ready: bool
     jar_path: str

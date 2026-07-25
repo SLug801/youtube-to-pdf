@@ -12,11 +12,14 @@ import type {
   BackendStatus,
   ConversionRequest,
   ConversionResult,
+  PreviewRequest,
+  RoiPreview,
 } from '../shared/contracts';
 
 const BACKEND_JAR = 'youtube-to-pdf-1.0.0-shaded.jar';
 const API_EXECUTABLE = process.platform === 'win32' ? 'ytpdf-api.exe' : 'ytpdf-api';
 const API_HOST = '127.0.0.1';
+const MAX_PREVIEW_BYTES = 12 * 1024 * 1024;
 
 function isFile(candidate: string): boolean {
   return fs.statSync(candidate, { throwIfNoEntry: false })?.isFile() ?? false;
@@ -102,6 +105,42 @@ export class BackendProcess {
 
   isRunning(): boolean {
     return this.activeJobId !== null;
+  }
+
+  async preview(request: PreviewRequest): Promise<RoiPreview> {
+    if (this.activeJobId) {
+      throw new Error('변환 작업 중에는 프리뷰를 불러올 수 없습니다.');
+    }
+    await this.ensureApi();
+    const response = await this.request('/api/v1/preview', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+    if (response.headers.get('content-type')?.split(';')[0] !== 'image/jpeg') {
+      throw new Error('FastAPI가 올바른 JPEG 프리뷰를 반환하지 않았습니다.');
+    }
+    const content = Buffer.from(await response.arrayBuffer());
+    if (content.byteLength === 0 || content.byteLength > MAX_PREVIEW_BYTES) {
+      throw new Error('프리뷰 이미지 크기가 허용 범위를 벗어났습니다.');
+    }
+    const width = Number(response.headers.get('X-YTPDF-Width'));
+    const height = Number(response.headers.get('X-YTPDF-Height'));
+    const timestampSeconds = Number(response.headers.get('X-YTPDF-Timestamp'));
+    if (
+      !Number.isFinite(width)
+      || width <= 0
+      || !Number.isFinite(height)
+      || height <= 0
+      || !Number.isFinite(timestampSeconds)
+    ) {
+      throw new Error('프리뷰 이미지 메타데이터가 올바르지 않습니다.');
+    }
+    return {
+      dataUrl: `data:image/jpeg;base64,${content.toString('base64')}`,
+      width,
+      height,
+      timestampSeconds,
+    };
   }
 
   async start(

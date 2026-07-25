@@ -10,6 +10,7 @@ from ytpdf_core.extractor import FrameExtractor, _match_offset
 from ytpdf_core.image_ops import SheetImageOps
 from ytpdf_core.models import Background, Motion, RoiConfig
 from ytpdf_core.pdf_builder import build_pdf
+from ytpdf_core.preview import create_preview
 
 
 def make_score_canvas(width: int, height: int, page: int = 0) -> np.ndarray:
@@ -122,3 +123,31 @@ def test_pdf_builder_creates_a4_document(tmp_path: Path) -> None:
 
     assert output.read_bytes().startswith(b"%PDF")
 
+
+def test_preview_reads_requested_frame_and_limits_width(tmp_path: Path) -> None:
+    work_directory = tmp_path / "sheet_01"
+    work_directory.mkdir()
+    video = work_directory / "video.mp4"
+    writer = cv2.VideoWriter(
+        str(video),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10,
+        (320, 120),
+    )
+    assert writer.isOpened()
+    for index in range(20):
+        writer.write(np.full((120, 320, 3), index * 10, dtype=np.uint8))
+    writer.release()
+
+    preview = create_preview(
+        "https://www.youtube.com/watch?v=test",
+        tmp_path,
+        at_seconds=1,
+        max_width=160,
+        logger=lambda _message: None,
+    )
+
+    assert preview.content.startswith(b"\xff\xd8")
+    assert preview.width == 160
+    assert preview.height == 60
+    assert preview.timestamp_seconds == 1

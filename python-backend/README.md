@@ -19,6 +19,7 @@ YTPDF_API_TOKEN=development-token uv run ytpdf-api
 ## API
 
 - `GET /health`: API와 선택된 변환 엔진 준비 상태
+- `POST /api/v1/preview`: ROI 설정용 JPEG 대표 프레임
 - `POST /api/v1/jobs`: 변환 작업 생성
 - `GET /api/v1/jobs/{job_id}`: 작업 상태
 - `POST /api/v1/jobs/{job_id}/cancel`: 작업 취소
@@ -27,7 +28,8 @@ YTPDF_API_TOKEN=development-token uv run ytpdf-api
 
 영상 변환은 API 프로세스가 아니라 별도 Python Worker 프로세스에서 실행됩니다. 현재 데스크톱
 동작과 동일하게 한 번에 한 작업만 허용하며 `YTPDF_ENGINE=java`로 기존 Java Worker를 선택할
-수 있습니다.
+수 있습니다. 프리뷰와 변환도 동시에 실행하지 않으며, 프리뷰가 내려받은 영상은 같은 출력
+폴더의 후속 변환에서 재사용합니다.
 
 ## 검증
 

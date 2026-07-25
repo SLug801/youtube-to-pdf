@@ -58,13 +58,17 @@ class JobManager:
         self._tasks: set[asyncio.Task[None]] = set()
         self._submit_lock = asyncio.Lock()
 
+    @property
+    def has_active_job(self) -> bool:
+        return any(not job.status.terminal for job in self._jobs.values())
+
     async def submit(self, request: ConversionRequest) -> JobResponse:
         engine_status = self.engine.status()
         if not engine_status.ready:
             raise EngineUnavailableError(engine_status.message)
 
         async with self._submit_lock:
-            if any(not job.status.terminal for job in self._jobs.values()):
+            if self.has_active_job:
                 raise JobConflictError("현재 다른 변환 작업이 실행 중입니다.")
             record = JobRecord(id=uuid4(), request=request)
             self._jobs[record.id] = record

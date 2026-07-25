@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,15 +8,18 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from ytpdf_api.engine import ConversionEngine, JavaEngine, PythonEngine
 from ytpdf_api.jobs import EngineUnavailableError, JobConflictError, JobManager
+from ytpdf_api.previews import generate_preview
 from ytpdf_api.schemas import (
     CancelResponse,
     ConversionRequest,
     HealthResponse,
     JobResponse,
+    PreviewRequest,
 )
 from ytpdf_api.settings import Settings
 
@@ -60,6 +64,7 @@ def create_app(
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     resolved_manager = manager or JobManager(create_engine(resolved_settings))
+    operation_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -89,8 +94,14 @@ def create_app(
         body: ConversionRequest,
         job_manager: Annotated[JobManager, Depends(get_manager)],
     ) -> JobResponse:
+        if operation_lock.locked():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="프리뷰 생성 중에는 변환 작업을 시작할 수 없습니다.",
+            )
         try:
-            return await job_manager.submit(body)
+            async with operation_lock:
+                return await job_manager.submit(body)
         except EngineUnavailableError as error:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -98,6 +109,48 @@ def create_app(
             ) from error
         except JobConflictError as error:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    @router.post("/api/v1/preview")
+    async def preview(
+        body: PreviewRequest,
+        job_manager: Annotated[JobManager, Depends(get_manager)],
+    ) -> Response:
+        if operation_lock.locked():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="다른 작업을 준비하고 있습니다.",
+            )
+
+        async with operation_lock:
+            if job_manager.has_active_job:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="변환 작업 중에는 프리뷰를 생성할 수 없습니다.",
+                )
+            try:
+                image = await run_in_threadpool(
+                    generate_preview,
+                    str(body.url),
+                    body.resolved_output_directory,
+                    at_seconds=body.at_seconds,
+                    yt_dlp_path=resolved_settings.yt_dlp_path,
+                    logger=lambda message: None,
+                )
+            except (OSError, ValueError) as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=str(error),
+                ) from error
+        return Response(
+            content=image.content,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-store",
+                "X-YTPDF-Width": str(image.width),
+                "X-YTPDF-Height": str(image.height),
+                "X-YTPDF-Timestamp": f"{image.timestamp_seconds:.3f}",
+            },
+        )
 
     @router.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
     async def get_job(

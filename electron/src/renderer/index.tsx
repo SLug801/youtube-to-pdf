@@ -4,8 +4,31 @@ import type {
   BackendEvent,
   BackendStatus,
   ConversionResult,
+  RoiPreview,
 } from '../shared/contracts';
 import './styles.css';
+
+interface RoiBounds {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+type RoiKey = keyof RoiBounds;
+
+const INITIAL_ROI: RoiBounds = {
+  top: 0.7,
+  bottom: 1,
+  left: 0,
+  right: 1,
+};
+
+function serializeRoi(bounds: RoiBounds): string {
+  return [bounds.top, bounds.bottom, bounds.left, bounds.right]
+    .map((value) => value.toFixed(2))
+    .join(',');
+}
 
 function App(): React.JSX.Element {
   const [status, setStatus] = useState<BackendStatus | null>(null);
@@ -13,7 +36,9 @@ function App(): React.JSX.Element {
   const [outputDirectory, setOutputDirectory] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
-  const [roi, setRoi] = useState('0.70,1.00,0.00,1.00');
+  const [roi, setRoi] = useState<RoiBounds>(INITIAL_ROI);
+  const [preview, setPreview] = useState<RoiPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [background, setBackground] =
     useState<'translucent' | 'opaque'>('translucent');
   const [motion, setMotion] = useState<'scroll' | 'cut'>('scroll');
@@ -36,6 +61,10 @@ function App(): React.JSX.Element {
     });
   }, []);
 
+  useEffect(() => {
+    setPreview(null);
+  }, [url, outputDirectory, start]);
+
   const selectOutputDirectory = async (): Promise<void> => {
     const selected = await window.youtubeToPdf.selectOutputDirectory();
     if (selected) {
@@ -56,7 +85,7 @@ function App(): React.JSX.Element {
         outputDirectory,
         start: start.trim() || undefined,
         end: end.trim() || undefined,
-        roi: roi.trim(),
+        roi: serializeRoi(roi),
         background,
         motion,
       });
@@ -66,6 +95,44 @@ function App(): React.JSX.Element {
     } finally {
       setRunning(false);
     }
+  };
+
+  const loadPreview = async (): Promise<void> => {
+    setError('');
+    setPreviewLoading(true);
+    try {
+      const nextPreview = await window.youtubeToPdf.loadPreview({
+        url: url.trim(),
+        outputDirectory,
+        at: start.trim() || undefined,
+      });
+      setPreview(nextPreview);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const updateRoi = (key: RoiKey, rawValue: string): void => {
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    setRoi((current) => {
+      const next = { ...current };
+      if (key === 'top') {
+        next.top = Math.min(Math.max(value, 0), current.bottom - 0.01);
+      } else if (key === 'bottom') {
+        next.bottom = Math.max(Math.min(value, 1), current.top + 0.01);
+      } else if (key === 'left') {
+        next.left = Math.min(Math.max(value, 0), current.right - 0.01);
+      } else {
+        next.right = Math.max(Math.min(value, 1), current.left + 0.01);
+      }
+      next[key] = Number(next[key].toFixed(2));
+      return next;
+    });
   };
 
   const cancelConversion = async (): Promise<void> => {
@@ -166,22 +233,108 @@ function App(): React.JSX.Element {
                 <option value="cut">화면 전환</option>
               </select>
             </label>
-            <label>
-              ROI
-              <input
-                value={roi}
-                onChange={(event) => setRoi(event.target.value)}
-                placeholder="0.70,1.00,0.00,1.00"
-                disabled={running}
-              />
-            </label>
           </div>
+
+          <section className="roi-editor" aria-label="악보 영역 설정">
+            <div className="roi-heading">
+              <div>
+                <h2>악보 영역 (ROI)</h2>
+                <p>{serializeRoi(roi)}</p>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={loadPreview}
+                disabled={
+                  running
+                  || previewLoading
+                  || !status?.ready
+                  || !url.trim()
+                  || !outputDirectory
+                }
+              >
+                {previewLoading ? '프리뷰 준비 중…' : '프리뷰 불러오기'}
+              </button>
+            </div>
+
+            {preview ? (
+              <figure className="preview-frame">
+                <img
+                  src={preview.dataUrl}
+                  alt={`${preview.timestampSeconds.toFixed(2)}초 영상 프리뷰`}
+                  draggable={false}
+                />
+                <div className="roi-dim roi-dim-top" style={{ height: `${roi.top * 100}%` }} />
+                <div
+                  className="roi-dim roi-dim-bottom"
+                  style={{ top: `${roi.bottom * 100}%` }}
+                />
+                <div
+                  className="roi-dim roi-dim-left"
+                  style={{
+                    top: `${roi.top * 100}%`,
+                    width: `${roi.left * 100}%`,
+                    height: `${(roi.bottom - roi.top) * 100}%`,
+                  }}
+                />
+                <div
+                  className="roi-dim roi-dim-right"
+                  style={{
+                    top: `${roi.top * 100}%`,
+                    left: `${roi.right * 100}%`,
+                    height: `${(roi.bottom - roi.top) * 100}%`,
+                  }}
+                />
+                <div
+                  className="roi-selection"
+                  style={{
+                    top: `${roi.top * 100}%`,
+                    left: `${roi.left * 100}%`,
+                    width: `${(roi.right - roi.left) * 100}%`,
+                    height: `${(roi.bottom - roi.top) * 100}%`,
+                  }}
+                />
+                <figcaption>
+                  {preview.timestampSeconds.toFixed(2)}초 · {preview.width}×{preview.height}
+                </figcaption>
+              </figure>
+            ) : (
+              <div className="preview-placeholder">
+                URL과 출력 폴더를 입력한 뒤 프리뷰를 불러오세요.
+              </div>
+            )}
+
+            <div className="roi-controls">
+              {([
+                ['top', '상단', 0, roi.bottom - 0.01],
+                ['bottom', '하단', roi.top + 0.01, 1],
+                ['left', '좌측', 0, roi.right - 0.01],
+                ['right', '우측', roi.left + 0.01, 1],
+              ] as const).map(([key, label, minimum, maximum]) => (
+                <label key={key}>
+                  <span>
+                    {label}
+                    <output>{roi[key].toFixed(2)}</output>
+                  </span>
+                  <input
+                    type="range"
+                    min={minimum}
+                    max={maximum}
+                    step="0.01"
+                    value={roi[key]}
+                    onChange={(event) => updateRoi(key, event.target.value)}
+                    disabled={running}
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
 
           <div className="actions">
             <button
               type="submit"
               className="primary"
-              disabled={running || !status?.ready || !outputDirectory}
+              disabled={running || previewLoading || !status?.ready || !outputDirectory}
             >
               {running ? '변환 중…' : 'PDF 변환 시작'}
             </button>

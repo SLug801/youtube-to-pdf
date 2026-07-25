@@ -62,6 +62,44 @@ def test_health_requires_token(tmp_path: Path) -> None:
     assert authorized.json()["engine"]["ready"] is True
 
 
+def test_preview_requires_token_and_returns_jpeg(tmp_path: Path) -> None:
+    work_directory = tmp_path / "sheet_01"
+    work_directory.mkdir()
+    video = work_directory / "video.mp4"
+    writer = cv2.VideoWriter(
+        str(video),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10,
+        (160, 90),
+    )
+    assert writer.isOpened()
+    for _ in range(10):
+        writer.write(np.full((90, 160, 3), 220, dtype=np.uint8))
+    writer.release()
+
+    settings = Settings(api_token="test", jar_path=tmp_path / "fake.jar")
+    app = create_app(settings, JobManager(FakeEngine()))
+    payload = {
+        "url": "https://www.youtube.com/watch?v=test",
+        "outputDirectory": str(tmp_path),
+        "at": "00:00.5",
+    }
+    with TestClient(app) as client:
+        unauthorized = client.post("/api/v1/preview", json=payload)
+        response = client.post(
+            "/api/v1/preview",
+            headers={"X-YTPDF-Token": "test"},
+            json=payload,
+        )
+
+    assert unauthorized.status_code == 401
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.headers["x-ytpdf-width"] == "160"
+    assert response.headers["x-ytpdf-height"] == "90"
+    assert response.content.startswith(b"\xff\xd8")
+
+
 def test_job_runs_in_worker_process_and_exposes_result(tmp_path: Path) -> None:
     settings = Settings(api_token="test", jar_path=tmp_path / "fake.jar")
     app = create_app(settings, JobManager(FakeEngine()))
@@ -110,6 +148,11 @@ def test_rejects_second_active_job(tmp_path: Path) -> None:
     with TestClient(app) as client:
         first = client.post("/api/v1/jobs", headers=headers, json=payload)
         second = client.post("/api/v1/jobs", headers=headers, json=payload)
+        preview = client.post(
+            "/api/v1/preview",
+            headers=headers,
+            json={**payload, "at": "00:01"},
+        )
         cancelled = client.post(
             f"/api/v1/jobs/{first.json()['id']}/cancel",
             headers=headers,
@@ -117,6 +160,7 @@ def test_rejects_second_active_job(tmp_path: Path) -> None:
 
     assert first.status_code == 202
     assert second.status_code == 409
+    assert preview.status_code == 409
     assert cancelled.status_code == 200
     assert cancelled.json()["accepted"] is True
 
