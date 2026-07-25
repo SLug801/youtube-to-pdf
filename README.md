@@ -23,14 +23,14 @@ pdf 추출 예 ( 반투명, 스크롤 영상 기준 )
 ## 주요 기능
 
 - 유튜브 URL만 넣으면 다운로드 → 프레임 분석 → 스티칭 → PDF까지 자동
-- **GUI**(미리보기에서 악보 영역을 드래그로 지정 + 진행 로그 + 취소) / **CLI**(여러 URL·배치) 모두 지원
+- **Electron GUI 마이그레이션 진행 중** — 기본 변환·로그·취소 연결 완료
+- **CLI**(여러 URL·배치) 지원
 - **배경×진행 2축 선택**(반투명/불투명 × 스크롤/화면전환) — 영상 종류에 맞게 조합
 - 반투명·저대비 배경에서도 악보 표기만 추출(배경 제거 → 흰 종이 + 검은 표기)
 - 스크롤 중복(겹침) 자동 제거 + 점프 스크롤 누락 방지(2-밴드 합의로 반복마디 오매칭 차단)
 - 변환 중 **경과 시간 표시** + 마지막 로그에 총 소요 시간
 - 인트로·아웃트로를 제외하는 **추출 시작~종료 구간** 지정(초 / `mm:ss` / `hh:mm:ss`)
 - 악보 한 줄이 완성될 때마다 즉시 저장하는 **스트리밍 스티칭**(긴 영상도 메모리 사용량 일정)
-- **완료되면 결과 폴더 자동 열기**(체크박스) · 같은 URL 재변환 시 **다운로드 캐시 재사용**
 
 ---
 
@@ -112,7 +112,7 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
 - **반투명 중복/누락 해결**: margin 기반 스크롤 판정 + **2-밴드 합의**, 인트로(빈 화면) 스킵, fade-in 대비 시드 갱신. 반복 패턴에서 생기던 페이지 통째-병합 중복은 **원본 회색조 재매칭**으로 제거(누락 없이).
 - **불투명 모드 신설**: adaptiveThreshold 이진화 + **페이지 스냅샷** 스티칭. 새 페이지를 붙이기 전 겹침을 **보수적으로 trim**해 경계 중복을 줄임(확신 없으면 누락 방지를 위해 통째로 유지).
 - **출력 노이즈 제거**: 밝기 바닥값 + 작은 고립 덩어리 제거(오선·숫자는 보존).
-- **GUI**: 드래그 ROI 프리뷰, 모드 버튼, 경과/총 시간 표시, 파일명 정규화, **완료 후 폴더 열기**.
+- **Electron 기반 전환**: Java 처리 엔진과 UI를 프로세스로 분리하고 로그·취소·출력 폴더 선택 연결.
 
 ---
 
@@ -120,9 +120,10 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
 
 | 항목 | 내용 |
 |---|---|
-| JDK | **21 이상** |
-| 빌드 | Gradle — 리포에 Wrapper(`gradlew`)가 포함되어 별도 설치 불필요 |
-| yt-dlp | **PATH에 설치 필요** (Windows에선 프로젝트 루트의 `yt-dlp.exe`도 사용 가능) |
+| JDK | **21** — Gradle 실행에도 JDK 21 사용 |
+| Node.js | Electron 개발 시 필요 |
+| 백엔드 빌드 | Gradle — `backend/`에 Wrapper가 포함되어 별도 설치 불필요 |
+| yt-dlp | **PATH에 설치 필요** (Windows에선 `backend/yt-dlp.exe`도 사용 가능) |
 | FFmpeg | **불필요** — JavaCV(bytedeco)에 번들됨 |
 | OS | **macOS·Windows·Linux** — 빌드하는 OS에 맞는 OpenCV/FFmpeg 네이티브를 자동 선택 |
 
@@ -132,55 +133,56 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
 
 ## 빌드 & 실행
 
-**macOS / Linux**
+### Electron 앱
 
 ```bash
-# 빌드  → build/libs/youtube-to-pdf-1.0.0-shaded.jar
-./gradlew shadowJar
+cd electron
+npm install
 
-# GUI 실행 (또는 ./gradlew run)
-./run.sh
+# 개발 실행
+npm start
+
+# 타입 검사
+npm test
+
+# Java 백엔드 빌드 후 Electron 앱 패키징
+npm run package
 ```
 
-**Windows**
+Electron Main 프로세스가 `backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar`를 실행합니다.
+현재 Electron 화면에는 URL·시작/종료 시각·출력 폴더·로그·취소 기능이 연결되어 있으며,
+ROI 프리뷰와 배경·진행 모드 선택은 순차 이식 중입니다.
 
-```bat
-:: 빌드  → build\libs\youtube-to-pdf-1.0.0-shaded.jar
-build.bat
+### Java 백엔드
 
-:: GUI 실행
-run.bat
+```bash
+cd backend
+
+# 테스트 + fat jar
+./gradlew test shadowJar
 ```
 
 > 앱이 실행 중이면 jar이 잠겨 빌드가 실패할 수 있습니다. 먼저 앱을 종료하세요.
 >
 > 리포에 Gradle Wrapper 실행파일(`gradlew`)이 없으면 처음 한 번 `gradle wrapper`로 생성하세요(로컬 Gradle 설치 시). VS Code/IntelliJ의 Gradle 연동이 자동 생성하기도 합니다.
 
-### 사용 흐름 (GUI)
-
-1. URL 입력 + 필요하면 **추출 구간** 입력(예: `00:15 ~ 04:45`) → **프리뷰 불러오기**
-   - 시작을 비우면 처음부터, 종료를 비우면 영상 끝까지 추출합니다.
-2. **ROI 박스를 악보 영역으로 드래그**
-3. **배경** 선택(반투명 패널 / 흰 종이) + **진행** 선택(스크롤 / 화면 전환) — 각각 독립
-4. **변환** → 완료되면 폴더 자동 열기
-
 ### CLI
 
 ```bash
 # 단일/다중 URL
-java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>" ["<URL2>" ...]
+java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>" ["<URL2>" ...]
 
 # URL 목록 파일(한 줄에 하나, # 주석 가능)
-java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
+java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --file urls.txt
 
 # ROI 지정
-java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --roi 0.72,1.00,0.00,1.00 "<URL>"
+java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --roi 0.72,1.00,0.00,1.00 "<URL>"
 
 # 15초부터 추출
-java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 "<URL>"
+java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 "<URL>"
 
 # 인트로와 아웃트로를 제외하고 15초~4분 45초만 추출
-java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end 04:45 "<URL>"
+java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end 04:45 "<URL>"
 ```
 
 | 옵션 | 설명 |
@@ -248,43 +250,36 @@ java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end 04:45 "
 - **FFmpeg** (JavaCV `FFmpegFrameGrabber`, 내장) — 프레임 디코딩
 - **Apache PDFBox** — PDF 출력
 - **yt-dlp** — 영상 다운로드
-- Swing — GUI
+- **Electron + React + TypeScript** — 신규 데스크톱 GUI
 
 ---
 
 ## 소스 구조
 
-```
-com/sheetmusic/
-├─ app/
-│  ├─ Main.java            진입점(CLI/GUI 분기)
-│  └─ GuiApp.java          Swing GUI (프리뷰·ROI·모드·타이머·폴더열기)
-│     ├─ PreviewPanel.java     드래그 조절 ROI 박스 프리뷰
-│     └─ CropPreviewPanel.java 캡처 영역 미리보기
-├─ pipeline/
-│  └─ VideoProcessor.java  파이프라인 오케스트레이션
-├─ download/
-│  └─ YtDlpDownloader.java yt-dlp 래퍼
-├─ vision/
-│  ├─ FrameExtractor.java  핵심: 프레임 정렬·병합 (모드별 스티칭)
-│  ├─ SheetImageOps.java   배경 제거·이진화·노이즈 제거 (Mat 연산)
-│  ├─ ScanParams.java      스캔/스티칭 튜닝 상수
-│  ├─ Background.java      배경 축(반투명 / 불투명) enum
-│  └─ Motion.java          진행 축(스크롤 / 화면 전환) enum
-├─ pdf/
-│  └─ PdfBuilder.java      PDFBox 출력
-├─ common/
-│  ├─ Config.java          상수
-│  └─ ProgressLogger.java  진행 로그 인터페이스
-└─ debug/
-   └─ *Test.java           단일 프레임/로컬 영상 튜닝용 개발 도구
+```text
+youtube-to-pdf/
+├─ backend/
+│  ├─ build.gradle
+│  └─ src/
+│     ├─ main/java/com/sheetmusic/
+│     │  ├─ vision/       프레임 분석·스티칭
+│     │  ├─ pipeline/     변환 파이프라인
+│     │  ├─ download/     yt-dlp 래퍼
+│     │  ├─ pdf/          PDFBox 출력
+│     │  └─ app/          CLI 진입점
+│     └─ test/
+└─ electron/
+   ├─ src/main/           창·IPC·Java 프로세스 관리
+   ├─ src/preload/        안전한 Renderer API
+   ├─ src/renderer/       React UI
+   └─ src/shared/         IPC 계약 타입
 ```
 
 ---
 
 ## 라이선스 / 법적 고지
 
-- **소스 코드**: [MIT License](LICENSE) (본 저장소의 `src/` 코드에 한함)
+- **소스 코드**: [MIT License](LICENSE) (본 저장소의 `backend/src/`, `electron/src/` 코드에 한함)
 - **번들 구성요소**: Java 런타임·FFmpeg·OpenCV·PDFBox·yt-dlp 등은 각자의 라이선스를
   따릅니다. 배포 시 [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt)를 함께 동봉하세요.
 

@@ -1,6 +1,9 @@
 target/
 build/
 .gradle/
+node_modules/
+.webpack/
+out/
 dist/
 dist-input/
 sheet_*/
@@ -14,3 +17,6 @@ youtube-to-pdf/
 .vscode/
 .serena/
 CLAUDE.md
+
+# Electron 패키징 시 생성되는 Java 백엔드 스테이징 파일
+electron/resources/backend/

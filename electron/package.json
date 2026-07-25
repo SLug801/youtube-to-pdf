@@ -1,0 +1,40 @@
+{
+  "name": "youtube-to-pdf-electron",
+  "productName": "YouTube to PDF",
+  "version": "0.1.0",
+  "description": "YouTube 악보 영상을 PDF로 변환하는 Electron 데스크톱 앱",
+  "main": ".webpack/main",
+  "private": true,
+  "scripts": {
+    "start": "electron-forge start",
+    "build:backend": "node scripts/stage-backend.mjs --build",
+    "stage:backend": "node scripts/stage-backend.mjs",
+    "package": "npm run build:backend && electron-forge package",
+    "make": "npm run build:backend && electron-forge make",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-deb": "^7.11.2",
+    "@electron-forge/maker-rpm": "^7.11.2",
+    "@electron-forge/maker-squirrel": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "@electron-forge/plugin-fuses": "^7.11.2",
+    "@electron-forge/plugin-webpack": "^7.11.2",
+    "@electron/fuses": "^1.8.0",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.2.8",
+    "@types/react-dom": "^19.2.3",
+    "css-loader": "^7.1.2",
+    "electron": "^43.2.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.4",
+    "typescript": "~5.9.3",
+    "webpack": "^5.101.3"
+  }
+}
