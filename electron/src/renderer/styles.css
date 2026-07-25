@@ -20,7 +20,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -114,7 +115,8 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-height: 44px;
   border: 1px solid #30363d;
@@ -125,7 +127,8 @@ input {
   color: #f0f6fc;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: #58a6ff;
   box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.13);
 }
@@ -143,6 +146,12 @@ input::placeholder {
 .time-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr;
   gap: 14px;
 }
 
@@ -260,6 +269,7 @@ footer {
   }
 
   .time-grid,
+  .mode-grid,
   .path-row {
     grid-template-columns: 1fr;
   }

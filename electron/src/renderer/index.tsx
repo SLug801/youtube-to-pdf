@@ -13,6 +13,10 @@ function App(): React.JSX.Element {
   const [outputDirectory, setOutputDirectory] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
+  const [roi, setRoi] = useState('0.70,1.00,0.00,1.00');
+  const [background, setBackground] =
+    useState<'translucent' | 'opaque'>('translucent');
+  const [motion, setMotion] = useState<'scroll' | 'cut'>('scroll');
   const [logs, setLogs] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ConversionResult | null>(null);
@@ -52,6 +56,9 @@ function App(): React.JSX.Element {
         outputDirectory,
         start: start.trim() || undefined,
         end: end.trim() || undefined,
+        roi: roi.trim(),
+        background,
+        motion,
       });
       setResult(conversionResult);
     } catch (reason) {
@@ -75,7 +82,7 @@ function App(): React.JSX.Element {
           <p className="eyebrow">LOCAL DESKTOP CONVERTER</p>
           <h1>YouTube 악보를 PDF로</h1>
           <p className="subtitle">
-            기존 JavaCV/OpenCV 엔진을 유지한 Electron 마이그레이션 베이스입니다.
+            FastAPI 작업 계층과 Python OpenCV Worker가 안전하게 변환합니다.
           </p>
         </div>
         <span className={`status ${status?.ready ? 'ready' : 'waiting'}`}>
@@ -134,6 +141,42 @@ function App(): React.JSX.Element {
             </label>
           </div>
 
+          <div className="mode-grid">
+            <label>
+              배경
+              <select
+                value={background}
+                onChange={(event) =>
+                  setBackground(event.target.value as 'translucent' | 'opaque')
+                }
+                disabled={running}
+              >
+                <option value="translucent">반투명</option>
+                <option value="opaque">불투명</option>
+              </select>
+            </label>
+            <label>
+              진행
+              <select
+                value={motion}
+                onChange={(event) => setMotion(event.target.value as 'scroll' | 'cut')}
+                disabled={running}
+              >
+                <option value="scroll">스크롤</option>
+                <option value="cut">화면 전환</option>
+              </select>
+            </label>
+            <label>
+              ROI
+              <input
+                value={roi}
+                onChange={(event) => setRoi(event.target.value)}
+                placeholder="0.70,1.00,0.00,1.00"
+                disabled={running}
+              />
+            </label>
+          </div>
+
           <div className="actions">
             <button
               type="submit"
@@ -175,7 +218,7 @@ function App(): React.JSX.Element {
       </section>
 
       <footer>
-        ROI 프리뷰와 배경·진행 모드 선택은 다음 마이그레이션 단계에서 연결합니다.
+        Python OpenCV 엔진이 기본이며, YTPDF_ENGINE=java로 기존 엔진을 선택할 수 있습니다.
       </footer>
     </main>
   );

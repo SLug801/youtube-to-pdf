@@ -23,7 +23,7 @@ pdf 추출 예 ( 반투명, 스크롤 영상 기준 )
 ## 주요 기능
 
 - 유튜브 URL만 넣으면 다운로드 → 프레임 분석 → 스티칭 → PDF까지 자동
-- **Electron GUI 마이그레이션 진행 중** — 기본 변환·로그·취소 연결 완료
+- **Electron + FastAPI 데스크톱 앱** — 작업 생성·로그 스트리밍·취소·결과 연결 완료
 - **CLI**(여러 URL·배치) 지원
 - **배경×진행 2축 선택**(반투명/불투명 × 스크롤/화면전환) — 영상 종류에 맞게 조합
 - 반투명·저대비 배경에서도 악보 표기만 추출(배경 제거 → 흰 종이 + 검은 표기)
@@ -38,8 +38,10 @@ pdf 추출 예 ( 반투명, 스크롤 영상 기준 )
 
 ```
 YouTube URL 입력
+FastAPI에 변환 작업 생성
+별도 Python Worker 프로세스 실행
 yt-dlp로 영상 다운로드
-FFmpeg(JavaCV)로 프레임 디코딩
+OpenCV VideoCapture(FFmpeg)로 프레임 디코딩
 OpenCV로 프레임 정렬·병합
 한 화면 폭이 완성될 때마다 배경 제거 / 이진화 후 이미지 조각 저장
 PDFBox로 저장된 조각을 하나의 PDF로 출력
@@ -64,7 +66,8 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
    **흰 종이 + 검은 표기**로 정리해 즉시 저장합니다. 최근 미완성 한 줄만 메모리에 남기고,
    마지막에 `PdfBuilder`가 저장된 모든 줄을 하나의 PDF로 묶습니다.
 
-> 다운로드는 `yt-dlp`, 디코딩은 JavaCV(번들 FFmpeg), 영상처리는 OpenCV, PDF는 Apache PDFBox를 사용합니다.
+> 기본 Python Worker는 `yt-dlp`, OpenCV, ReportLab을 사용합니다. 기존 JavaCV·PDFBox
+> Worker도 `YTPDF_ENGINE=java` 폴백으로 유지합니다.
 
 ---
 
@@ -112,7 +115,8 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
 - **반투명 중복/누락 해결**: margin 기반 스크롤 판정 + **2-밴드 합의**, 인트로(빈 화면) 스킵, fade-in 대비 시드 갱신. 반복 패턴에서 생기던 페이지 통째-병합 중복은 **원본 회색조 재매칭**으로 제거(누락 없이).
 - **불투명 모드 신설**: adaptiveThreshold 이진화 + **페이지 스냅샷** 스티칭. 새 페이지를 붙이기 전 겹침을 **보수적으로 trim**해 경계 중복을 줄임(확신 없으면 누락 방지를 위해 통째로 유지).
 - **출력 노이즈 제거**: 밝기 바닥값 + 작은 고립 덩어리 제거(오선·숫자는 보존).
-- **Electron 기반 전환**: Java 처리 엔진과 UI를 프로세스로 분리하고 로그·취소·출력 폴더 선택 연결.
+- **Python 엔진 전환**: Java `FrameExtractor` 상태 머신을 Python OpenCV로 이식하고 작업
+  ID·상태·취소·SSE 이벤트·결과 API 뒤의 기본 Worker로 연결. Java는 비교·비상 폴백으로 유지.
 
 ---
 
@@ -121,6 +125,8 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
 | 항목 | 내용 |
 |---|---|
 | JDK | **21** — Gradle 실행에도 JDK 21 사용 |
+| Python | **3.12 이상** — FastAPI 작업 제어 계층과 패키징에 사용 |
+| uv | Python 의존성·가상환경·FastAPI 실행 파일 빌드에 사용 |
 | Node.js | Electron 개발 시 필요 |
 | 백엔드 빌드 | Gradle — `backend/`에 Wrapper가 포함되어 별도 설치 불필요 |
 | yt-dlp | **PATH에 설치 필요** (Windows에선 `backend/yt-dlp.exe`도 사용 가능) |
@@ -139,19 +145,45 @@ PDFBox로 저장된 조각을 하나의 PDF로 출력
 cd electron
 npm install
 
+# FastAPI 개발 의존성 준비
+cd ../python-backend
+uv sync --extra dev
+
 # 개발 실행
+cd ../electron
 npm start
 
 # 타입 검사
 npm test
 
-# Java 백엔드 빌드 후 Electron 앱 패키징
+# Java JAR + FastAPI 실행 파일 빌드 후 Electron 앱 패키징
 npm run package
 ```
 
-Electron Main 프로세스가 `backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar`를 실행합니다.
+Electron Main 프로세스가 인증 토큰과 임의의 loopback 포트로 FastAPI sidecar를 기동하고,
+FastAPI가 별도 Python OpenCV Worker를 실행합니다. `YTPDF_ENGINE=java`를 지정하면
+`backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar`를 폴백 Worker로 실행합니다.
 현재 Electron 화면에는 URL·시작/종료 시각·출력 폴더·로그·취소 기능이 연결되어 있으며,
 ROI 프리뷰와 배경·진행 모드 선택은 순차 이식 중입니다.
+
+### FastAPI 백엔드
+
+```bash
+cd python-backend
+uv sync --extra dev
+
+# 정적 검사 + 테스트
+uv run ruff check .
+uv run mypy
+uv run pytest
+
+# 개발 서버(별도 실행이 필요한 경우)
+YTPDF_API_TOKEN=development-token uv run ytpdf-api
+```
+
+API는 `POST /api/v1/jobs`, 작업 조회·취소·SSE 이벤트·결과 다운로드를 제공합니다. 작업 요청에서
+`roi`, `background`(`translucent`/`opaque`), `motion`(`scroll`/`cut`)을 선택할 수 있습니다.
+자세한 내용은 [`python-backend/README.md`](python-backend/README.md)를 참고하세요.
 
 ### Java 백엔드
 
@@ -246,6 +278,10 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
 ## 기술 스택
 
 - **Java 21**, Gradle (shadow jar) — macOS/Windows/Linux 빌드 자동 지원
+- **Python 3.12+**, FastAPI, Pydantic, Uvicorn — 작업 API·검증·이벤트 스트리밍
+- **OpenCV Python + NumPy** — 기본 프레임 디코딩·특징 추출·스티칭 엔진
+- **ReportLab + Pillow** — Python Worker PDF 출력
+- **PyInstaller** — 플랫폼별 FastAPI sidecar 실행 파일 패키징
 - **OpenCV** (org.opencv via JavaCV/bytedeco) — 템플릿 매칭, 모폴로지, 이진화, 연결요소
 - **FFmpeg** (JavaCV `FFmpegFrameGrabber`, 내장) — 프레임 디코딩
 - **Apache PDFBox** — PDF 출력
@@ -268,8 +304,12 @@ youtube-to-pdf/
 │     │  ├─ pdf/          PDFBox 출력
 │     │  └─ app/          CLI 진입점
 │     └─ test/
+├─ python-backend/
+│  ├─ src/ytpdf_api/      FastAPI·작업 관리자·Python/Java Worker 어댑터
+│  ├─ src/ytpdf_core/     FastAPI 비의존 다운로드·OpenCV·PDF 처리 엔진
+│  └─ tests/              API·스키마·자식 프로세스 통합 테스트
 └─ electron/
-   ├─ src/main/           창·IPC·Java 프로세스 관리
+   ├─ src/main/           창·IPC·FastAPI sidecar 수명주기 관리
    ├─ src/preload/        안전한 Renderer API
    ├─ src/renderer/       React UI
    └─ src/shared/         IPC 계약 타입

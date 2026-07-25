@@ -10,6 +10,9 @@ export interface ConversionRequest {
   outputDirectory: string;
   start?: string;
   end?: string;
+  roi?: string;
+  background?: 'translucent' | 'opaque';
+  motion?: 'scroll' | 'cut';
 }
 
 export type BackendEvent =

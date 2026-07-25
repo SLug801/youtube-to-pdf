@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ytpdf-backend"
+version = "0.1.0"
+description = "YouTube 악보 PDF 변환 작업을 관리하는 로컬 FastAPI 백엔드"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "numpy>=2.2,<3",
+    "opencv-python-headless>=4.11,<5",
+    "pillow>=11,<13",
+    "reportlab>=4.3,<5",
+    "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.13,<7",
+]
+dev = [
+    "httpx2>=2.9,<3",
+    "mypy>=1.15,<2",
+    "pytest>=8.3,<9",
+    "ruff>=0.11,<1",
+    "types-reportlab>=4.4,<5",
+]
+
+[project.scripts]
+ytpdf-api = "ytpdf_api.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ytpdf_api", "src/ytpdf_core"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["ytpdf_api", "ytpdf_core"]

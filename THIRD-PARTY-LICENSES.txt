@@ -53,6 +53,41 @@ license. Keep this file together with any redistribution.
    License: MIT
    https://github.com/facebook/react/blob/main/LICENSE
 
+10. Python Runtime
+    License: Python Software Foundation License (PSF-2.0)
+    https://docs.python.org/3/license.html
+
+11. FastAPI / Pydantic
+    License: MIT
+    https://github.com/fastapi/fastapi/blob/master/LICENSE
+    https://github.com/pydantic/pydantic/blob/main/LICENSE
+
+12. Uvicorn
+    License: BSD 3-Clause
+    https://github.com/Kludex/uvicorn/blob/main/LICENSE.md
+
+13. NumPy
+    License: BSD 3-Clause (번들된 제3자 구성요소는 각 라이선스 적용)
+    https://github.com/numpy/numpy/blob/main/LICENSE.txt
+
+14. opencv-python-headless
+    Python package wrapper: MIT
+    OpenCV: Apache License 2.0
+    번들 FFmpeg 등 제3자 바이너리는 패키지의 LICENSE-3RD-PARTY.txt 조건 적용
+    https://github.com/opencv/opencv-python/blob/4.x/LICENSE.txt
+
+15. Pillow
+    License: HPND
+    https://github.com/python-pillow/Pillow/blob/main/LICENSE
+
+16. ReportLab
+    License: BSD 3-Clause
+    https://github.com/MrBitBucket/reportlab-mirror/blob/master/LICENSE.txt
+
+17. PyInstaller bootloader
+    License: GPL v2 or later with the PyInstaller Bootloader Exception
+    https://pyinstaller.org/en/stable/license.html
+
 ------------------------------------------------------------
 Apache License 2.0 전문: http://www.apache.org/licenses/LICENSE-2.0
 BSD / LGPL / GPL 전문은 각 프로젝트 링크를 참조하세요.

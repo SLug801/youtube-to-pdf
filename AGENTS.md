@@ -9,6 +9,7 @@
 
 ## 기술 스택
 - **데스크톱 UI**: Electron, React, TypeScript, Electron Forge
+- **기본 처리 엔진/작업 API**: Python 3.12+, FastAPI, OpenCV, NumPy, ReportLab
 - **백엔드 언어/빌드**: Java 21, Gradle (Shadow 플러그인으로 fat jar). Gradle 실행 JDK도 21 사용.
 - **다운로드**: `yt-dlp` (PATH 또는 `backend/yt-dlp.exe`)
 - **디코딩/영상처리**: JavaCV(bytedeco) + OpenCV 4.7, FFmpeg는 JavaCV에 번들
@@ -25,6 +26,16 @@ gradlew.bat test shadowJar
 
 # 결과물
 backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar
+
+# FastAPI 정적 검사 + 테스트
+cd python-backend
+uv sync --extra dev
+uv run ruff check .
+uv run mypy
+uv run pytest
+
+# FastAPI 단독 개발 실행
+YTPDF_API_TOKEN=development-token uv run ytpdf-api
 
 # Electron 개발 실행
 cd electron
@@ -50,7 +61,8 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
 
 ## 코드 구조
 
-최상위는 Java 처리 엔진인 `backend/`와 Electron 데스크톱 앱인 `electron/`으로 나뉜다.
+최상위는 Java 처리 엔진인 `backend/`, FastAPI 작업 계층인 `python-backend/`, Electron
+데스크톱 앱인 `electron/`으로 나뉜다.
 ### 백엔드 (`backend/src/main/java/com/sheetmusic/`)
 | 파일 | 역할 |
 |---|---|
@@ -72,15 +84,36 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
 
 | 경로 | 역할 |
 |---|---|
-| `main/` | 창·파일 선택·Java 백엔드 프로세스 수명주기와 IPC 관리 |
+| `main/` | 창·파일 선택·FastAPI sidecar 수명주기와 IPC 관리 |
 | `preload/` | Renderer에 허용된 API만 `contextBridge`로 노출 |
 | `renderer/` | React UI |
 | `shared/` | Main/Preload/Renderer가 공유하는 요청·이벤트 타입 |
+
+### FastAPI (`python-backend/src/ytpdf_api/`)
+
+| 파일 | 역할 |
+|---|---|
+| `app.py` | 작업·상태·취소·SSE·결과 API |
+| `schemas.py` | Pydantic 요청·응답·이벤트 계약 |
+| `jobs.py` | 장시간 작업 상태와 자식 프로세스 수명주기 |
+| `engine.py` | 기본 Python Worker와 Java 폴백 Worker 어댑터 |
+| `settings.py` | 환경 변수 기반 로컬 sidecar 설정 |
+
+### Python 처리 코어 (`python-backend/src/ytpdf_core/`)
+
+| 파일 | 역할 |
+|---|---|
+| `extractor.py` | Java FrameExtractor를 포팅한 스캔·스티칭 상태 머신 |
+| `image_ops.py` | 배경별 특징 추출·출력 정리 |
+| `downloader.py` | yt-dlp 자식 프로세스 래퍼 |
+| `pdf_builder.py` | 스티칭 행을 A4 PDF로 배치 |
+| `pipeline.py` | 다운로드→추출→PDF 오케스트레이션 |
 
 ## 코드 컨벤션
 - 패키지: `com.sheetmusic` 아래 역할별 서브패키지
 - 주석/로그/사용자 문자열: **한국어**. 로그는 `[태그]` 접두(예: `[조각]`, `[오류]`, `[경고]`)
 - 클래스명 PascalCase, 메서드/필드 camelCase. 튜닝용 상수는 `UPPER_SNAKE`(예: `MARGIN`, `TPL_RATIO`)
+- Python은 `ruff`·`mypy --strict`를 통과해야 하며 API route에 영상 처리 로직을 넣지 않는다.
 - Java 21 문법 적극 사용: switch 패턴(`case "--file", "-f" -> ...`), 텍스트 블록(`"""`)
 - 인코딩 UTF-8. 실행 시 `-Dfile.encoding=UTF-8`, `jna.nosys/jna.protected` 시스템 프로퍼티 설정
 
@@ -95,3 +128,9 @@ java -jar backend/build/libs/youtube-to-pdf-1.0.0-shaded.jar --start 00:15 --end
 - 플랫폼 의존 네이티브(OpenCV/FFmpeg)라 의존성 버전 변경 시 `javacpp.platform`과의 호환을 확인.
 - Renderer에서 Node.js API나 전체 `ipcRenderer`를 직접 노출하지 않는다. 파일·프로세스 작업은
   Main에서 수행하고 Preload에는 용도별 메서드만 공개한다.
+- FastAPI route 안에서 영상 변환을 직접 실행하지 않는다. `JobManager`가 별도 Worker
+  프로세스로 실행하며, 영상 처리 코어는 FastAPI에 의존하지 않게 유지한다.
+- 기본 엔진은 Python이며 `YTPDF_ENGINE=java`로 Java 폴백을 선택할 수 있다. Python/Java
+  결과 차이는 합성 회귀 테스트와 실제 샘플 영상으로 비교한 뒤 튜닝 상수를 조정한다.
+- 로컬 API는 `127.0.0.1`의 임의 포트와 프로세스별 토큰을 사용한다. 토큰을 Renderer에
+  노출하거나 `0.0.0.0`에 바인딩하지 않는다.

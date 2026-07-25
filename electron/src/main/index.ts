@@ -35,7 +35,7 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.on('closed', () => {
-    backend.cancel();
+    void backend.cancel();
     mainWindow = null;
   });
 }
@@ -82,11 +82,27 @@ function validateRequest(value: unknown): ConversionRequest {
     }
   }
 
+  const roi = request.roi?.trim() || '0.70,1.00,0.00,1.00';
+  if (roi.length > 80) {
+    throw new Error('ROI 형식이 올바르지 않습니다.');
+  }
+  const background = request.background ?? 'translucent';
+  if (!['translucent', 'opaque'].includes(background)) {
+    throw new Error('지원하지 않는 배경 모드입니다.');
+  }
+  const motion = request.motion ?? 'scroll';
+  if (!['scroll', 'cut'].includes(motion)) {
+    throw new Error('지원하지 않는 진행 모드입니다.');
+  }
+
   return {
     url: url.toString(),
     outputDirectory: path.resolve(request.outputDirectory),
     start: request.start?.trim() || undefined,
     end: request.end?.trim() || undefined,
+    roi,
+    background,
+    motion,
   };
 }
 
@@ -140,6 +156,12 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
-  backend.cancel();
+let shutdownStarted = false;
+app.on('before-quit', (event) => {
+  if (shutdownStarted) {
+    return;
+  }
+  event.preventDefault();
+  shutdownStarted = true;
+  void backend.shutdown().finally(() => app.quit());
 });
