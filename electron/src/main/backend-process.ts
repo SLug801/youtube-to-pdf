@@ -407,7 +407,7 @@ export class BackendProcess {
   private resolvePaths(): BackendPaths {
     const root = app.isPackaged
       ? path.join(process.resourcesPath, 'backend')
-      : path.resolve(app.getAppPath(), '..', 'backend');
+      : path.resolve(app.getAppPath(), 'vendor');
     const pythonProject = path.resolve(app.getAppPath(), '..', 'python-backend');
 
     const ytDlpNames =

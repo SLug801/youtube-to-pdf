@@ -24,5 +24,5 @@ SOFTWARE.
 
 NOTE: The MIT license above applies ONLY to the source code authored in this
 repository (the application code under src/). It does NOT cover the bundled
-third-party components (Java runtime, FFmpeg, OpenCV, PDFBox, yt-dlp, etc.),
+third-party components (Python runtime, FFmpeg, OpenCV, ReportLab, yt-dlp, etc.),
 which are distributed under their own licenses. See THIRD-PARTY-LICENSES.txt.

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const electronDirectory = path.resolve(scriptDirectory, '..');
 const repositoryDirectory = path.resolve(electronDirectory, '..');
-const backendDirectory = path.join(repositoryDirectory, 'backend');
+const vendorDirectory = path.join(electronDirectory, 'vendor');
 const pythonBackendDirectory = path.join(repositoryDirectory, 'python-backend');
 const licensesPath = path.join(repositoryDirectory, 'THIRD-PARTY-LICENSES.txt');
 const stageDirectory = path.join(electronDirectory, 'resources', 'backend');
@@ -68,7 +68,7 @@ if (process.platform !== 'win32') {
 }
 
 const ytDlpName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-const ytDlpPath = path.join(backendDirectory, ytDlpName);
+const ytDlpPath = path.join(vendorDirectory, ytDlpName);
 if (isFile(ytDlpPath)) {
   fs.copyFileSync(ytDlpPath, path.join(stageDirectory, ytDlpName));
 } else {

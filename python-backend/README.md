@@ -1,7 +1,7 @@
 # FastAPI 백엔드
 
 Electron과 향후 AI Agent가 동일한 작업 API를 사용할 수 있도록 만든 로컬 제어 계층입니다.
-변환 엔진은 FastAPI와 분리된 Python OpenCV Worker이며 Java/JAR 런타임에 의존하지 않습니다.
+변환 엔진은 FastAPI와 분리된 Python OpenCV Worker 프로세스로 실행됩니다.
 
 ## 개발 실행
 

@@ -67,7 +67,6 @@ ReportLab으로 저장된 조각을 하나의 PDF로 출력
    마지막에 `PdfBuilder`가 저장된 모든 줄을 하나의 PDF로 묶습니다.
 
 > Electron 배포본은 `yt-dlp`, OpenCV, ReportLab 기반 Python Worker만 사용합니다.
-> `backend/`의 JavaCV·PDFBox 구현은 회귀 비교용 레거시 소스로만 보존됩니다.
 
 ---
 
@@ -115,9 +114,8 @@ ReportLab으로 저장된 조각을 하나의 PDF로 출력
 - **반투명 중복/누락 해결**: margin 기반 스크롤 판정 + **2-밴드 합의**, 인트로(빈 화면) 스킵, fade-in 대비 시드 갱신. 반복 패턴에서 생기던 페이지 통째-병합 중복은 **원본 회색조 재매칭**으로 제거(누락 없이).
 - **불투명 모드 신설**: adaptiveThreshold 이진화 + **페이지 스냅샷** 스티칭. 새 페이지를 붙이기 전 겹침을 **보수적으로 trim**해 경계 중복을 줄임(확신 없으면 누락 방지를 위해 통째로 유지).
 - **출력 노이즈 제거**: 밝기 바닥값 + 작은 고립 덩어리 제거(오선·숫자는 보존).
-- **Python 엔진 전환**: Java `FrameExtractor` 상태 머신을 Python OpenCV로 이식하고 작업
-  ID·상태·취소·SSE 이벤트·결과 API 뒤의 Worker로 연결. Electron 배포에서 JAR·Gradle·JDK
-  의존성을 제거하고 Python 단일 런타임으로 전환.
+- **Python 엔진 전환**: 스티칭 상태 머신을 Python OpenCV로 구현하고 작업
+  ID·상태·취소·SSE 이벤트·결과 API 뒤의 Worker로 연결. Python 단일 처리 엔진으로 통합.
 
 ---
 
@@ -128,7 +126,7 @@ ReportLab으로 저장된 조각을 하나의 PDF로 출력
 | Python | **3.12 이상** — FastAPI 작업 제어 계층과 패키징에 사용 |
 | uv | Python 의존성·가상환경·FastAPI 실행 파일 빌드에 사용 |
 | Node.js | Electron 개발 시 필요 |
-| yt-dlp | **PATH에 설치 필요** (Windows에선 `backend/yt-dlp.exe`도 사용 가능) |
+| yt-dlp | **PATH에 설치 필요** (Windows 배포용 실행 파일은 `electron/vendor/yt-dlp.exe`) |
 | FFmpeg | **별도 설치 불필요** — OpenCV Python wheel의 비디오 디코더 사용 |
 | OS | **macOS·Windows·Linux** — 빌드 OS에 맞는 Python/OpenCV 바이너리를 패키징 |
 
@@ -160,8 +158,7 @@ npm run package
 ```
 
 Electron Main 프로세스가 인증 토큰과 임의의 loopback 포트로 FastAPI sidecar를 기동하고,
-FastAPI가 별도 Python OpenCV Worker를 실행합니다. 앱 빌드와 실행에 JDK·Gradle·Java JAR는
-필요하지 않습니다.
+FastAPI가 별도 Python OpenCV Worker를 실행합니다.
 현재 Electron 화면에는 URL·시작/종료 시각·출력 폴더·로그·취소 기능이 연결되어 있으며,
 대표 프레임 위에서 ROI의 상·하·좌·우 경계를 조절하고 배경·진행 모드를 선택할 수 있습니다.
 프리뷰에 내려받은 영상은 실제 변환에서 재사용합니다.
@@ -219,19 +216,6 @@ uv run ytpdf convert \
 | `--motion <모드>` | `scroll` 또는 `cut` |
 | `--help`, `-h` | 도움말 |
 
-### 레거시 Java 비교 엔진
-
-`backend/`는 Python 포팅 결과를 비교하기 위한 레거시 구현입니다. Electron 앱에는 JAR나 Java
-런타임이 포함되지 않습니다. 알고리즘 회귀 비교가 필요한 개발자만 JDK 21로 실행합니다.
-
-```bash
-cd backend
-./gradlew test shadowJar
-java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>"
-```
-
----
-
 ## ROI(악보 영역) 설정
 
 화면에서 악보 띠가 차지하는 영역을 `top,bottom,left,right` 비율(0~1)로 지정합니다.
@@ -288,7 +272,6 @@ java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>"
 - **PyInstaller** — 플랫폼별 FastAPI sidecar 실행 파일 패키징
 - **yt-dlp** — 영상 다운로드
 - **Electron + React + TypeScript** — 신규 데스크톱 GUI
-- **Java 21 + JavaCV + PDFBox** — `backend/` 레거시 비교 엔진에서만 사용
 
 ---
 
@@ -296,21 +279,12 @@ java -jar build/libs/youtube-to-pdf-1.0.0-shaded.jar "<URL>"
 
 ```text
 youtube-to-pdf/
-├─ backend/
-│  ├─ build.gradle
-│  └─ src/                앱에 포함되지 않는 레거시 Java 비교 엔진
-│     ├─ main/java/com/sheetmusic/
-│     │  ├─ vision/       프레임 분석·스티칭
-│     │  ├─ pipeline/     변환 파이프라인
-│     │  ├─ download/     yt-dlp 래퍼
-│     │  ├─ pdf/          PDFBox 출력
-│     │  └─ app/          CLI 진입점
-│     └─ test/
 ├─ python-backend/
 │  ├─ src/ytpdf_api/      FastAPI·작업 관리자·Python Worker 어댑터
 │  ├─ src/ytpdf_core/     FastAPI 비의존 다운로드·OpenCV·PDF 처리 엔진
 │  └─ tests/              API·스키마·자식 프로세스 통합 테스트
 └─ electron/
+   ├─ vendor/             패키징용 플랫폼별 yt-dlp 실행 파일
    ├─ src/main/           창·IPC·FastAPI sidecar 수명주기 관리
    ├─ src/preload/        안전한 Renderer API
    ├─ src/renderer/       React UI

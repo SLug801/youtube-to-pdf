@@ -1,6 +1,5 @@
 target/
 build/
-.gradle/
 node_modules/
 .webpack/
 out/
@@ -23,5 +22,5 @@ youtube-to-pdf/
 .serena/
 CLAUDE.md
 
-# Electron 패키징 시 생성되는 Java 백엔드 스테이징 파일
+# Electron 패키징 시 생성되는 Python 백엔드 스테이징 파일
 electron/resources/backend/

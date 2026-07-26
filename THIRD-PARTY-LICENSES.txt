@@ -58,11 +58,6 @@ Keep this file together with any redistribution.
     License: GPL v2 or later with the PyInstaller Bootloader Exception
     https://pyinstaller.org/en/stable/license.html
 
-------------------------------------------------------------
-`backend/`의 JavaCV·JavaCPP·OpenCV preset·FFmpeg·PDFBox 의존성은
-레거시 비교 엔진을 별도로 빌드할 때만 사용되며 Electron 배포본에는 포함되지 않습니다.
-해당 JAR를 별도 배포한다면 각 Gradle 의존성의 라이선스 고지를 추가로 제공해야 합니다.
-
 Apache License 2.0 전문: https://www.apache.org/licenses/LICENSE-2.0
 BSD / GPL 전문은 각 프로젝트 링크를 참조하세요.
 

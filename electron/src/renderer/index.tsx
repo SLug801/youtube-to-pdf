@@ -46,6 +46,7 @@ function App(): React.JSX.Element {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ConversionResult | null>(null);
   const [error, setError] = useState('');
+  const [logsOpen, setLogsOpen] = useState(false);
 
   useEffect(() => {
     window.youtubeToPdf.getBackendStatus().then(setStatus).catch((reason: Error) => {
@@ -142,123 +143,235 @@ function App(): React.JSX.Element {
     }
   };
 
+  const activityMessage = error
+    || (result?.success ? `완료 · ${result.outputPath}` : '')
+    || (running ? logs[logs.length - 1] || '변환 작업을 준비하고 있습니다.' : '')
+    || status?.message
+    || '백엔드 상태를 확인하고 있습니다.';
+  const activityKind = error
+    ? 'error'
+    : result?.success
+      ? 'success'
+      : running
+        ? 'running'
+        : 'idle';
+
   return (
-    <main className="shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">LOCAL DESKTOP CONVERTER</p>
-          <h1>YouTube 악보를 PDF로</h1>
-          <p className="subtitle">
-            FastAPI 작업 계층과 Python OpenCV Worker가 안전하게 변환합니다.
-          </p>
+    <main className="app-shell">
+      <header className="app-header">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <div>
+            <h1>YouTube to PDF</h1>
+            <p>영상 악보 추출기</p>
+          </div>
         </div>
-        <span className={`status ${status?.ready ? 'ready' : 'waiting'}`}>
+        <div className={`backend-status ${status?.ready ? 'ready' : 'waiting'}`}>
           <span className="status-dot" />
           {status?.ready ? '백엔드 준비됨' : '백엔드 확인 중'}
-        </span>
+        </div>
       </header>
 
-      <section className="panel">
-        <form onSubmit={startConversion}>
-          <label>
-            YouTube URL
-            <input
-              type="url"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              required
-              disabled={running}
-            />
-          </label>
-
-          <label>
-            출력 폴더
-            <div className="path-row">
-              <input
-                value={outputDirectory}
-                placeholder="PDF를 저장할 폴더를 선택하세요"
-                readOnly
-                required
-              />
-              <button type="button" className="secondary" onClick={selectOutputDirectory}>
-                폴더 선택
-              </button>
+      <form className="workbench" onSubmit={startConversion}>
+        <aside className="settings-pane">
+          <div className="pane-heading">
+            <div>
+              <h2>변환 설정</h2>
+              <p>영상과 악보 유형을 지정하세요.</p>
             </div>
-          </label>
-
-          <div className="time-grid">
-            <label>
-              시작 시각
-              <input
-                value={start}
-                onChange={(event) => setStart(event.target.value)}
-                placeholder="00:15"
-                disabled={running}
-              />
-            </label>
-            <label>
-              종료 시각
-              <input
-                value={end}
-                onChange={(event) => setEnd(event.target.value)}
-                placeholder="04:45"
-                disabled={running}
-              />
-            </label>
           </div>
 
-          <div className="mode-grid">
-            <label>
-              배경
-              <select
-                value={background}
-                onChange={(event) =>
-                  setBackground(event.target.value as 'translucent' | 'opaque')
-                }
-                disabled={running}
-              >
-                <option value="translucent">반투명</option>
-                <option value="opaque">불투명</option>
-              </select>
-            </label>
-            <label>
-              진행
-              <select
-                value={motion}
-                onChange={(event) => setMotion(event.target.value as 'scroll' | 'cut')}
-                disabled={running}
-              >
-                <option value="scroll">스크롤</option>
-                <option value="cut">화면 전환</option>
-              </select>
-            </label>
-          </div>
+          <div className="settings-content">
+            <section className="setting-section">
+              <h3>입력</h3>
+              <label className="field">
+                <span>YouTube URL</span>
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="youtube.com/watch?v=..."
+                  required
+                  disabled={running}
+                />
+              </label>
 
-          <section className="roi-editor" aria-label="악보 영역 설정">
-            <div className="roi-heading">
-              <div>
-                <h2>악보 영역 (ROI)</h2>
-                <p>{serializeRoi(roi)}</p>
+              <label className="field">
+                <span>출력 폴더</span>
+                <div className="path-row">
+                  <input
+                    value={outputDirectory}
+                    placeholder="저장 위치 선택"
+                    title={outputDirectory}
+                    readOnly
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="icon-button folder-button"
+                    onClick={selectOutputDirectory}
+                    aria-label="출력 폴더 선택"
+                    title="출력 폴더 선택"
+                  >
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M2.5 5.5h5l1.7 2h8.3v7.8a1.7 1.7 0 0 1-1.7 1.7H4.2a1.7 1.7 0 0 1-1.7-1.7V5.5Z" />
+                      <path d="M2.5 7.5V4.7A1.7 1.7 0 0 1 4.2 3h3.1l1.6 2h6.9a1.7 1.7 0 0 1 1.7 1.7v.8" />
+                    </svg>
+                  </button>
+                </div>
+              </label>
+            </section>
+
+            <section className="setting-section">
+              <h3>변환 구간</h3>
+              <div className="time-grid">
+                <label className="field">
+                  <span>시작</span>
+                  <input
+                    value={start}
+                    onChange={(event) => setStart(event.target.value)}
+                    placeholder="00:00"
+                    disabled={running}
+                  />
+                </label>
+                <label className="field">
+                  <span>종료</span>
+                  <input
+                    value={end}
+                    onChange={(event) => setEnd(event.target.value)}
+                    placeholder="영상 끝"
+                    disabled={running}
+                  />
+                </label>
               </div>
-              <button
-                type="button"
-                className="secondary"
-                onClick={loadPreview}
-                disabled={
-                  running
-                  || previewLoading
-                  || !status?.ready
-                  || !url.trim()
-                  || !outputDirectory
-                }
-              >
-                {previewLoading ? '프리뷰 준비 중…' : '프리뷰 불러오기'}
-              </button>
-            </div>
+            </section>
 
+            <section className="setting-section mode-section">
+              <div className="section-label">
+                <h3>배경 처리</h3>
+                <span>악보 뒤 영상 노출 여부</span>
+              </div>
+              <div className="choice-grid">
+                <button
+                  type="button"
+                  className={`choice-button ${background === 'translucent' ? 'selected' : ''}`}
+                  aria-pressed={background === 'translucent'}
+                  onClick={() => setBackground('translucent')}
+                  disabled={running}
+                >
+                  <strong>반투명</strong>
+                  <small>영상 위 악보</small>
+                </button>
+                <button
+                  type="button"
+                  className={`choice-button ${background === 'opaque' ? 'selected' : ''}`}
+                  aria-pressed={background === 'opaque'}
+                  onClick={() => setBackground('opaque')}
+                  disabled={running}
+                >
+                  <strong>불투명</strong>
+                  <small>단색 배경 악보</small>
+                </button>
+              </div>
+
+              <div className="section-label motion-label">
+                <h3>진행 방식</h3>
+                <span>악보가 바뀌는 형태</span>
+              </div>
+              <div className="choice-grid">
+                <button
+                  type="button"
+                  className={`choice-button ${motion === 'scroll' ? 'selected' : ''}`}
+                  aria-pressed={motion === 'scroll'}
+                  onClick={() => setMotion('scroll')}
+                  disabled={running}
+                >
+                  <strong>스크롤</strong>
+                  <small>좌우로 연속 이동</small>
+                </button>
+                <button
+                  type="button"
+                  className={`choice-button ${motion === 'cut' ? 'selected' : ''}`}
+                  aria-pressed={motion === 'cut'}
+                  onClick={() => setMotion('cut')}
+                  disabled={running}
+                >
+                  <strong>화면 전환</strong>
+                  <small>페이지 단위 교체</small>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <div className="settings-actions">
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={
+                running
+                || previewLoading
+                || !status?.ready
+                || !url.trim()
+                || !outputDirectory
+              }
+            >
+              {running ? (
+                <>
+                  <span className="spinner" aria-hidden="true" />
+                  변환 중
+                </>
+              ) : 'PDF 변환 시작'}
+            </button>
+            <button
+              type="button"
+              className="cancel-button"
+              disabled={!running}
+              onClick={cancelConversion}
+            >
+              취소
+            </button>
+          </div>
+        </aside>
+
+        <section className="preview-pane">
+          <div className="preview-heading">
+            <div>
+              <div className="title-row">
+                <h2>악보 영역</h2>
+                <code>{serializeRoi(roi)}</code>
+              </div>
+              <p>파란 테두리 안쪽만 PDF 변환에 사용됩니다.</p>
+            </div>
+            <button
+              type="button"
+              className="preview-button"
+              onClick={loadPreview}
+              disabled={
+                running
+                || previewLoading
+                || !status?.ready
+                || !url.trim()
+                || !outputDirectory
+              }
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M16.4 6.2A7 7 0 1 0 17 11" />
+                <path d="M13.4 3.5h3.4v3.4" />
+              </svg>
+              {previewLoading ? '불러오는 중' : preview ? '새로고침' : '프리뷰 불러오기'}
+            </button>
+          </div>
+
+          <div className="preview-workspace">
             {preview ? (
-              <figure className="preview-frame">
+              <figure
+                className="preview-frame"
+                style={{ aspectRatio: `${preview.width} / ${preview.height}` }}
+              >
                 <img
                   src={preview.dataUrl}
                   alt={`${preview.timestampSeconds.toFixed(2)}초 영상 프리뷰`}
@@ -300,79 +413,84 @@ function App(): React.JSX.Element {
               </figure>
             ) : (
               <div className="preview-placeholder">
-                URL과 출력 폴더를 입력한 뒤 프리뷰를 불러오세요.
+                <span className="viewfinder" aria-hidden="true">
+                  <i />
+                </span>
+                <strong>프리뷰가 아직 없습니다</strong>
+                <p>URL과 저장 위치를 입력한 뒤 프리뷰를 불러오세요.</p>
               </div>
             )}
+          </div>
 
-            <div className="roi-controls">
-              {([
-                ['top', '상단', 0, roi.bottom - 0.01],
-                ['bottom', '하단', roi.top + 0.01, 1],
-                ['left', '좌측', 0, roi.right - 0.01],
-                ['right', '우측', roi.left + 0.01, 1],
-              ] as const).map(([key, label, minimum, maximum]) => (
-                <label key={key}>
-                  <span>
-                    {label}
-                    <output>{roi[key].toFixed(2)}</output>
-                  </span>
-                  <input
-                    type="range"
-                    min={minimum}
-                    max={maximum}
-                    step="0.01"
-                    value={roi[key]}
-                    onChange={(event) => updateRoi(key, event.target.value)}
-                    disabled={running}
-                  />
-                </label>
-              ))}
+          <div className="roi-controls">
+            {([
+              ['top', '상단', 0, roi.bottom - 0.01],
+              ['bottom', '하단', roi.top + 0.01, 1],
+              ['left', '좌측', 0, roi.right - 0.01],
+              ['right', '우측', roi.left + 0.01, 1],
+            ] as const).map(([key, label, minimum, maximum]) => (
+              <label key={key} className="roi-control">
+                <span>
+                  {label}
+                  <output>{roi[key].toFixed(2)}</output>
+                </span>
+                <input
+                  type="range"
+                  min={minimum}
+                  max={maximum}
+                  step="0.01"
+                  value={roi[key]}
+                  onChange={(event) => updateRoi(key, event.target.value)}
+                  disabled={running}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+      </form>
+
+      <footer className={`activity-bar ${activityKind}`}>
+        <div className="activity-message" title={activityMessage}>
+          <span className="activity-indicator" />
+          <span>{activityMessage}</span>
+        </div>
+        <button
+          type="button"
+          className={`log-toggle ${logsOpen ? 'active' : ''}`}
+          onClick={() => setLogsOpen((current) => !current)}
+          aria-expanded={logsOpen}
+        >
+          처리 로그
+          <span>{logs.length}</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d={logsOpen ? 'm4 10 4-4 4 4' : 'm4 6 4 4 4-4'} />
+          </svg>
+        </button>
+      </footer>
+
+      {logsOpen && (
+        <section className="log-drawer" aria-label="처리 로그">
+          <div className="log-heading">
+            <div>
+              <h2>처리 로그</h2>
+              <span>{logs.length}줄</span>
             </div>
-          </section>
-
-          <div className="actions">
-            <button
-              type="submit"
-              className="primary"
-              disabled={running || previewLoading || !status?.ready || !outputDirectory}
-            >
-              {running ? '변환 중…' : 'PDF 변환 시작'}
-            </button>
             <button
               type="button"
-              className="danger"
-              disabled={!running}
-              onClick={cancelConversion}
+              className="close-log"
+              onClick={() => setLogsOpen(false)}
+              aria-label="처리 로그 닫기"
             >
-              취소
+              ×
             </button>
           </div>
-        </form>
-      </section>
-
-      {status && !status.ready && (
-        <p className="notice">
-          {status.message} <code>cd electron && npm run build:backend</code>
-        </p>
+          <pre aria-live="polite">
+            {logs.length > 0
+              ? logs.join('\n')
+              : '변환을 시작하면 처리 과정이 여기에 표시됩니다.'}
+          </pre>
+        </section>
       )}
-      {error && <p className="notice error">{error}</p>}
-      {result?.success && (
-        <p className="notice success">완료: {result.outputPath}</p>
-      )}
-
-      <section className="panel log-panel">
-        <div className="panel-title">
-          <h2>처리 로그</h2>
-          <span>{logs.length} lines</span>
-        </div>
-        <pre aria-live="polite">
-          {logs.length > 0 ? logs.join('\n') : '변환을 시작하면 백엔드 로그가 여기에 표시됩니다.'}
-        </pre>
-      </section>
-
-      <footer>
-        Python OpenCV Worker가 영상 분석과 PDF 생성을 전담합니다.
-      </footer>
     </main>
   );
 }
