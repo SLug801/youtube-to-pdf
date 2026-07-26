@@ -9,9 +9,9 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from ytpdf_core.image_ops import Image, SheetImageOps
-from ytpdf_core.models import Background, Motion, RoiConfig
-from ytpdf_core.params import (
+from .image_ops import Image, SheetImageOps
+from .models import Background, Motion, RoiConfig
+from .params import (
     CONTENT_MIN,
     CUT_SAME_SCREEN,
     CUT_STABLE,

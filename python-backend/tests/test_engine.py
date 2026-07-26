@@ -1,11 +1,11 @@
 import sys
 from pathlib import Path
 
-import ytpdf_api.worker
-from ytpdf_api.engine import PythonEngine
-from ytpdf_api.schemas import ConversionRequest
-from ytpdf_api.settings import Settings
-from ytpdf_api.worker import run_cli
+import api.worker
+from api.engine import PythonEngine
+from api.schemas import ConversionRequest
+from api.settings import Settings
+from api.worker import run_cli
 
 
 def test_python_engine_builds_worker_contract(tmp_path: Path) -> None:
@@ -20,7 +20,7 @@ def test_python_engine_builds_worker_contract(tmp_path: Path) -> None:
     assert engine.command(request) == [
         sys.executable,
         "-m",
-        "ytpdf_api",
+        "api",
         "worker",
         "--output-directory",
         str(tmp_path),
@@ -47,7 +47,7 @@ def test_python_cli_converts_with_current_directory_default(
         return output_directory / "sheet_01" / "sheet_01.pdf"
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(ytpdf_api.worker, "convert_url", fake_convert_url)
+    monkeypatch.setattr(api.worker, "convert_url", fake_convert_url)
 
     assert run_cli(
         [

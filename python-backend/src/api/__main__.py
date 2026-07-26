@@ -4,8 +4,9 @@ import sys
 
 import uvicorn
 
-from ytpdf_api.app import create_app
-from ytpdf_api.settings import Settings
+# PyInstaller가 이 파일을 스크립트 진입점으로 직접 분석하므로 절대 import를 사용한다.
+from api.app import create_app
+from api.settings import Settings
 
 
 def print_help() -> None:
@@ -23,7 +24,7 @@ def print_help() -> None:
 def main() -> None:
     arguments = sys.argv[1:]
     if arguments and arguments[0] in {"worker", "convert"}:
-        from ytpdf_api.worker import run_cli, run_worker
+        from api.worker import run_cli, run_worker
 
         command = arguments[0]
         runner = run_worker if command == "worker" else run_cli

@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from ytpdf_api.engine import ConversionEngine
-from ytpdf_api.schemas import ConversionRequest, JobEvent, JobResponse, JobStatus
+from .engine import ConversionEngine
+from .schemas import ConversionRequest, JobEvent, JobResponse, JobStatus
 
 
 class EngineUnavailableError(RuntimeError):

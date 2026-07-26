@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from ytpdf_core.extractor import FrameExtractor, _match_offset
-from ytpdf_core.image_ops import SheetImageOps
-from ytpdf_core.models import Background, Motion, RoiConfig
-from ytpdf_core.pdf_builder import build_pdf
-from ytpdf_core.preview import create_preview
+from core.extractor import FrameExtractor, _match_offset
+from core.image_ops import SheetImageOps
+from core.models import Background, Motion, RoiConfig
+from core.pdf_builder import build_pdf
+from core.preview import create_preview
 
 
 def make_score_canvas(width: int, height: int, page: int = 0) -> np.ndarray:

@@ -4,9 +4,10 @@ import argparse
 import os
 from pathlib import Path
 
-from ytpdf_api.schemas import parse_time_seconds
-from ytpdf_core.models import Background, Motion, RoiConfig
-from ytpdf_core.pipeline import convert_url
+from core.models import Background, Motion, RoiConfig
+from core.pipeline import convert_url
+
+from .schemas import parse_time_seconds
 
 
 def _run_conversion(

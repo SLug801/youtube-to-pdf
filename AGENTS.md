@@ -41,7 +41,7 @@ npm run package
 ## 코드 구조
 
 최상위는 Python 처리 엔진·FastAPI인 `python-backend/`와 데스크톱 앱인 `electron/`로 나뉜다.
-핵심 알고리즘 상세는 README의 "동작 원리" 절 참고. 튜닝 상수는 `ytpdf_core/params.py`에 모여 있다.
+핵심 알고리즘 상세는 README의 "동작 원리" 절 참고. 튜닝 상수는 `core/params.py`에 모여 있다.
 
 ### Electron (`electron/src/`)
 
@@ -52,7 +52,7 @@ npm run package
 | `renderer/` | React UI |
 | `shared/` | Main/Preload/Renderer가 공유하는 요청·이벤트 타입 |
 
-### FastAPI (`python-backend/src/ytpdf_api/`)
+### FastAPI (`python-backend/src/api/`)
 
 | 파일 | 역할 |
 |---|---|
@@ -63,7 +63,7 @@ npm run package
 | `previews.py` | OpenCV를 지연 로드하는 프리뷰 서비스 어댑터 |
 | `settings.py` | 환경 변수 기반 로컬 sidecar 설정 |
 
-### Python 처리 코어 (`python-backend/src/ytpdf_core/`)
+### Python 처리 코어 (`python-backend/src/core/`)
 
 | 파일 | 역할 |
 |---|---|
@@ -85,7 +85,7 @@ npm run package
 - **모드는 2축**: `Background`(반투명/불투명)이 특징추출·출력을, `Motion`(스크롤/화면전환)이
   스티칭 전략을 결정. 결과가 이상하면 코드보다 이 조합부터 점검(예: 불투명인데 가로 스크롤이면
   `불투명+스크롤`. `화면전환`으로 두면 '멈춤'이 안 잡혀 누락). 배경=전처리, 진행=스티칭으로 직교.
-- 영상마다 결과가 다르면 코드를 고치기 전에 `ytpdf_core/params.py`의 튜닝 상수부터 조정
+- 영상마다 결과가 다르면 코드를 고치기 전에 `core/params.py`의 튜닝 상수부터 조정
   (`MARGIN`↓=누락 방지, `MARGIN`↑=중복 방지). 실행 로그의 `dx`/`score`, 카운트(0이 아닌 것만
   표시: `스크롤/페이지/정지/합의거부/트림`), `[2밴드 거부]` 줄이 튜닝 단서.
 - 도돌이(반복) 구간은 픽셀 스티칭으로 중복이 쌓이는 **알려진 한계**. 새 버그로 오해하지 말 것.

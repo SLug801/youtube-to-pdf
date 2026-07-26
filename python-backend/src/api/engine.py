@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from importlib.util import find_spec
 from typing import Protocol
 
-from ytpdf_api.schemas import ConversionRequest, EngineStatus
-from ytpdf_api.settings import Settings
+from .schemas import ConversionRequest, EngineStatus
+from .settings import Settings
 
 
 class ConversionEngine(Protocol):
@@ -39,7 +39,7 @@ class PythonEngine:
         command = (
             [sys.executable, "worker"]
             if getattr(sys, "frozen", False)
-            else [sys.executable, "-m", "ytpdf_api", "worker"]
+            else [sys.executable, "-m", "api", "worker"]
         )
         command.extend(
             [

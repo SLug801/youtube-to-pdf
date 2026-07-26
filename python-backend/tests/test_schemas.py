@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from ytpdf_api.schemas import ConversionRequest, parse_time_seconds
+from api.schemas import ConversionRequest, parse_time_seconds
 
 
 @pytest.mark.parametrize(

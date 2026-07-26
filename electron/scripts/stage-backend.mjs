@@ -39,7 +39,7 @@ if (shouldBuild) {
       'build/pyinstaller',
       '--specpath',
       'build/pyinstaller',
-      'src/ytpdf_api/__main__.py',
+      'src/api/__main__.py',
     ],
     {
       cwd: pythonBackendDirectory,

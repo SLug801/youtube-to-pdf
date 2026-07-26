@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ytpdf_core.preview import PreviewImage
+    from core.preview import PreviewImage
 
 
 def generate_preview(
@@ -17,7 +17,7 @@ def generate_preview(
     logger: Callable[[str], None],
 ) -> PreviewImage:
     # OpenCV 로드는 패키징 환경에서 오래 걸리므로 API 기동이 아닌 첫 프리뷰 요청에서 수행한다.
-    from ytpdf_core.preview import create_preview
+    from core.preview import create_preview
 
     return create_preview(
         url,

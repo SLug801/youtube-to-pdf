@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from ytpdf_core.downloader import download_video
+from .downloader import download_video
 
 Logger = Callable[[str], None]
 

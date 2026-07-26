@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from ytpdf_core.models import Background
+from .models import Background
 
 Image = NDArray[Any]
 

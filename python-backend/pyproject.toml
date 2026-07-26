@@ -30,11 +30,11 @@ dev = [
 ]
 
 [project.scripts]
-ytpdf-api = "ytpdf_api.__main__:main"
-ytpdf = "ytpdf_api.__main__:main"
+ytpdf-api = "api.__main__:main"
+ytpdf = "api.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ytpdf_api", "src/ytpdf_core"]
+packages = ["src/api", "src/core"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
@@ -50,4 +50,4 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-packages = ["ytpdf_api", "ytpdf_core"]
+packages = ["api", "core"]

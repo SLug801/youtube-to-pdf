@@ -8,11 +8,11 @@ import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
-from ytpdf_api.app import create_app
-from ytpdf_api.engine import PythonEngine
-from ytpdf_api.jobs import JobManager
-from ytpdf_api.schemas import ConversionRequest, EngineStatus
-from ytpdf_api.settings import Settings
+from api.app import create_app
+from api.engine import PythonEngine
+from api.jobs import JobManager
+from api.schemas import ConversionRequest, EngineStatus
+from api.settings import Settings
 
 
 class FakeEngine:

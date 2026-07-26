@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from ytpdf_core.downloader import download_video
-from ytpdf_core.extractor import FrameExtractor
-from ytpdf_core.models import Background, Motion, RoiConfig
-from ytpdf_core.pdf_builder import build_pdf
+from .downloader import download_video
+from .extractor import FrameExtractor
+from .models import Background, Motion, RoiConfig
+from .pdf_builder import build_pdf
 
 Logger = Callable[[str], None]
 
@@ -44,4 +44,3 @@ def convert_url(
     video_path.unlink(missing_ok=True)
     logger(f"[정리] 영상 파일 삭제됨 → 결과물: {work_directory}/")
     return pdf_path
-

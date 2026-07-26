@@ -11,17 +11,17 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request,
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from ytpdf_api.engine import ConversionEngine, PythonEngine
-from ytpdf_api.jobs import EngineUnavailableError, JobConflictError, JobManager
-from ytpdf_api.previews import generate_preview
-from ytpdf_api.schemas import (
+from .engine import ConversionEngine, PythonEngine
+from .jobs import EngineUnavailableError, JobConflictError, JobManager
+from .previews import generate_preview
+from .schemas import (
     CancelResponse,
     ConversionRequest,
     HealthResponse,
     JobResponse,
     PreviewRequest,
 )
-from ytpdf_api.settings import Settings
+from .settings import Settings
 
 VERSION = "0.1.0"
 

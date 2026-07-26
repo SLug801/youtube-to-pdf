@@ -3,6 +3,31 @@
 Electron과 향후 AI Agent가 동일한 작업 API를 사용할 수 있도록 만든 로컬 제어 계층입니다.
 변환 엔진은 FastAPI와 분리된 Python OpenCV Worker 프로세스로 실행됩니다.
 
+## 코드 구조
+
+```text
+src/
+├─ api/                  외부 요청과 작업 수명주기
+│  ├─ app.py             FastAPI 라우트 구성
+│  ├─ schemas.py         요청·응답 데이터 계약
+│  ├─ jobs.py            작업 상태·취소·이벤트 관리
+│  ├─ engine.py          별도 Worker 프로세스 실행
+│  ├─ previews.py        ROI 프리뷰 연결
+│  └─ settings.py        환경 변수 설정
+└─ core/                 FastAPI와 무관한 변환 기능
+   ├─ pipeline.py        다운로드→추출→PDF 흐름
+   ├─ extractor.py       프레임 스캔·스티칭
+   ├─ image_ops.py       특징 추출·배경 정리
+   ├─ downloader.py      yt-dlp 실행
+   ├─ preview.py         대표 프레임 생성
+   ├─ pdf_builder.py     PDF 출력
+   ├─ models.py          변환 모드·ROI 모델
+   └─ params.py          영상 분석 튜닝값
+```
+
+의존 방향은 `api → core` 한 방향입니다. `core`는 FastAPI나 Electron을 알지 않으므로 CLI,
+테스트 또는 다른 인터페이스에서도 그대로 재사용할 수 있습니다.
+
 ## 개발 실행
 
 Python 의존성을 설치하고 API를 실행합니다.

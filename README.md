@@ -280,8 +280,8 @@ uv run ytpdf convert \
 ```text
 youtube-to-pdf/
 ├─ python-backend/
-│  ├─ src/ytpdf_api/      FastAPI·작업 관리자·Python Worker 어댑터
-│  ├─ src/ytpdf_core/     FastAPI 비의존 다운로드·OpenCV·PDF 처리 엔진
+│  ├─ src/api/            FastAPI·작업 관리자·Python Worker 어댑터
+│  ├─ src/core/           FastAPI 비의존 다운로드·OpenCV·PDF 처리 엔진
 │  └─ tests/              API·스키마·자식 프로세스 통합 테스트
 └─ electron/
    ├─ vendor/             패키징용 플랫폼별 yt-dlp 실행 파일
