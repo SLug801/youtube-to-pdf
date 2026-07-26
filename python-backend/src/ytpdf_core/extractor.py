@@ -15,7 +15,6 @@ from ytpdf_core.params import (
     CONTENT_MIN,
     CUT_SAME_SCREEN,
     CUT_STABLE,
-    CUT_TRIM_SCORE,
     DX_AGREE_TOL,
     MARGIN,
     MIN_SCORE,
@@ -207,7 +206,7 @@ class FrameExtractor:
         canvas_width = 0
         started = False
         scrolled = False
-        scroll_count = page_count = static_count = reject_count = trim_count = 0
+        scroll_count = page_count = static_count = reject_count = 0
         second_inset = _clamp(
             int(roi_width * SECOND_BAND_RATIO),
             template_width,
@@ -275,44 +274,17 @@ class FrameExtractor:
                     or self.image_ops.has_sheet_structure(roi_color)
                 )
                 if changed and stable and sheet_frame:
-                    dx, score, zero = _match_offset(
-                        confirmed_feature,
-                        feature,
-                        template_width,
-                        TPL_INSET,
-                    )
-                    last_dx, last_score = dx, score
-                    trust_overlap = (
-                        MIN_SHIFT <= dx <= roi_width - template_width
-                        and score >= CUT_TRIM_SCORE
-                        and score - zero >= MARGIN
-                    )
-                    if trust_overlap and dx <= second_reach:
-                        dx2, score2, _ = _match_offset(
-                            confirmed_feature,
-                            feature,
-                            template_width,
-                            second_inset,
-                        )
-                        if score2 >= CUT_TRIM_SCORE and abs(dx - dx2) > DX_AGREE_TOL:
-                            trust_overlap = False
-                    appended_width = dx if trust_overlap else roi_width
-                    if trust_overlap:
-                        writer.append_slice(roi_color, roi_width - dx, dx)
-                        trim_count += 1
-                    else:
-                        writer.append(roi_color)
+                    # 반복되는 악보 패턴을 겹침으로 오인하지 않도록 화면 전환은 전체를 보존한다.
+                    writer.append(roi_color)
                     confirmed_feature = feature.copy()
-                    canvas_width += appended_width
+                    confirmed_color = roi_color.copy()
+                    canvas_width += roi_width
                     page_count += 1
                     scrolled = True
-                    trim_message = (
-                        f" | trim={roi_width - appended_width}px" if trust_overlap else ""
-                    )
                     self.logger(
                         f"[화면 확정] t={current_seconds:.1f}s | "
                         f"confirmed={similarity_confirmed:.2f} "
-                        f"stable={similarity_last:.2f}{trim_message}"
+                        f"stable={similarity_last:.2f} | 전체 화면 추가"
                     )
                 elif not scrolled and not changed:
                     writer.replace_seed(roi_color)
@@ -414,7 +386,7 @@ class FrameExtractor:
                 self.logger(
                     f"  진행 {min(100, percentage):.0f}% ({elapsed}s) 폭={canvas_width}px "
                     f"| dx={last_dx} score={last_score:.2f} | "
-                    f"{_counts(scroll_count, page_count, static_count, reject_count, trim_count)}"
+                    f"{_counts(scroll_count, page_count, static_count, reject_count)}"
                 )
             sample_index += 1
 
@@ -425,7 +397,7 @@ class FrameExtractor:
         self.logger(
             f"[스트리밍 스티칭] 누적 폭={canvas_width}px 높이={roi_height}px "
             f"| 임시 버퍼≤{roi_width * 2}px | "
-            f"{_counts(scroll_count, page_count, static_count, reject_count, trim_count)}"
+            f"{_counts(scroll_count, page_count, static_count, reject_count)}"
         )
         self.logger(f"[완료] 총 {len(saved)}줄 생성")
         return saved
@@ -472,12 +444,11 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
-def _counts(scroll: int, page: int, static: int, reject: int, trim: int) -> str:
+def _counts(scroll: int, page: int, static: int, reject: int) -> str:
     values = (
         ("스크롤", scroll),
         ("페이지", page),
         ("정지", static),
         ("합의거부", reject),
-        ("트림", trim),
     )
     return " ".join(f"{label}{count}" for label, count in values if count > 0) or "-"

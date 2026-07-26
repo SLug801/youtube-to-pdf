@@ -1,6 +1,7 @@
 import type { Configuration } from 'webpack';
 
 const config: Configuration = {
+  devtool: 'source-map',
   module: {
     rules: [
       {

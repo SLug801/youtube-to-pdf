@@ -111,6 +111,27 @@ def test_cut_video_commits_stable_pages_and_respects_time_range(tmp_path: Path) 
     assert len(ranged) == 1
 
 
+def test_cut_video_preserves_full_pages_even_when_they_overlap(tmp_path: Path) -> None:
+    canvas = make_score_canvas(480, 100)
+    first = np.ascontiguousarray(canvas[:, :240])
+    second = np.ascontiguousarray(canvas[:, 120:360])
+    video = tmp_path / "cut-overlap.avi"
+    write_video(video, [first.copy() for _ in range(20)] + [second.copy() for _ in range(20)])
+
+    saved = FrameExtractor(
+        roi=RoiConfig(0, 1, 0, 1),
+        background=Background.OPAQUE,
+        motion=Motion.CUT,
+        logger=lambda _message: None,
+    ).extract(video, tmp_path / "cut-overlap-frames")
+
+    assert len(saved) == 2
+    with Image.open(saved[1]) as image:
+        actual = np.asarray(image.convert("RGB"), dtype=np.int16)
+    expected = cv2.cvtColor(second, cv2.COLOR_BGR2RGB).astype(np.int16)
+    assert float(np.mean(np.abs(actual - expected))) < 8
+
+
 def test_pdf_builder_creates_a4_document(tmp_path: Path) -> None:
     images: list[Path] = []
     for index in range(3):
