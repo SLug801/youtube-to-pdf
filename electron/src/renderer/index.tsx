@@ -7,6 +7,7 @@ import type {
   RoiPreview,
 } from '../shared/contracts';
 import './styles.css';
+import { TempoPage } from './tempo';
 
 interface RoiBounds {
   top: number;
@@ -31,6 +32,7 @@ function serializeRoi(bounds: RoiBounds): string {
 }
 
 function App(): React.JSX.Element {
+  const [activeTool, setActiveTool] = useState<'converter' | 'tempo'>('tempo');
   const [status, setStatus] = useState<BackendStatus | null>(null);
   const [url, setUrl] = useState('');
   const [outputDirectory, setOutputDirectory] = useState('');
@@ -157,7 +159,7 @@ function App(): React.JSX.Element {
         : 'idle';
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${activeTool === 'tempo' ? 'tempo-shell' : ''}`}>
       <header className="app-header">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -166,16 +168,38 @@ function App(): React.JSX.Element {
             <span />
           </span>
           <div>
-            <h1>YouTube to PDF</h1>
-            <p>영상 악보 추출기</p>
+            <h1>Score Lab</h1>
+            <p>악보 추출과 리듬 연습</p>
           </div>
         </div>
-        <div className={`backend-status ${status?.ready ? 'ready' : 'waiting'}`}>
-          <span className="status-dot" />
-          {status?.ready ? '백엔드 준비됨' : '백엔드 확인 중'}
-        </div>
+        <nav className="tool-navigation" aria-label="도구 전환">
+          <button
+            type="button"
+            className={activeTool === 'converter' ? 'active' : ''}
+            onClick={() => setActiveTool('converter')}
+          >
+            악보 변환
+          </button>
+          <button
+            type="button"
+            className={activeTool === 'tempo' ? 'active' : ''}
+            onClick={() => setActiveTool('tempo')}
+          >
+            Tempo
+          </button>
+        </nav>
+        {activeTool === 'converter' ? (
+          <div className={`backend-status ${status?.ready ? 'ready' : 'waiting'}`}>
+            <span className="status-dot" />
+            {status?.ready ? '백엔드 준비됨' : '백엔드 확인 중'}
+          </div>
+        ) : (
+          <div className="tempo-header-label"><span />DRUM PRACTICE</div>
+        )}
       </header>
 
+      {activeTool === 'converter' ? (
+        <>
       <form className="workbench" onSubmit={startConversion}>
         <aside className="settings-pane">
           <div className="pane-heading">
@@ -490,6 +514,10 @@ function App(): React.JSX.Element {
               : '변환을 시작하면 처리 과정이 여기에 표시됩니다.'}
           </pre>
         </section>
+      )}
+        </>
+      ) : (
+        <TempoPage />
       )}
     </main>
   );

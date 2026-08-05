@@ -79,6 +79,7 @@ p {
 }
 
 .app-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -87,6 +88,102 @@ p {
   padding: 0 20px;
   background: rgba(255, 255, 255, 0.94);
   -webkit-app-region: drag;
+}
+
+.tool-navigation {
+  position: absolute;
+  left: 50%;
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 2px;
+  background: var(--surface-muted);
+  transform: translateX(-50%);
+  -webkit-app-region: no-drag;
+}
+
+.tool-navigation button {
+  height: 26px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 13px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tool-navigation button:hover {
+  color: var(--text);
+}
+
+.tool-navigation button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(24, 25, 23, 0.12);
+}
+
+.tempo-shell .app-header {
+  border-color: #30342b;
+  background: #171a15;
+  color: #f2f4ed;
+}
+
+.tempo-shell .brand-mark {
+  background: #c9ff3d;
+}
+
+.tempo-shell .brand-mark span,
+.tempo-shell .brand-mark::after {
+  background: #171a15;
+}
+
+.tempo-shell .brand-mark::after {
+  box-shadow: 0 -7px 0 -1px #171a15;
+}
+
+.tempo-shell .brand p {
+  color: #747a6d;
+}
+
+.tempo-shell .tool-navigation {
+  border-color: #34382f;
+  background: #11130f;
+}
+
+.tempo-shell .tool-navigation button {
+  color: #777d70;
+}
+
+.tempo-shell .tool-navigation button:hover {
+  color: #eff2e9;
+}
+
+.tempo-shell .tool-navigation button.active {
+  background: #292e23;
+  color: #c9ff3d;
+  box-shadow: none;
+}
+
+.tempo-header-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #747a6d;
+  font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+}
+
+.tempo-header-label span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #c9ff3d;
+  box-shadow: 0 0 7px rgba(201, 255, 61, 0.48);
 }
 
 .brand {
