@@ -22,9 +22,9 @@ let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1120,
-    height: 780,
-    minWidth: 900,
+    width: 1280,
+    height: 820,
+    minWidth: 860,
     minHeight: 640,
     backgroundColor: '#0d1117',
     webPreferences: {
@@ -32,6 +32,8 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // 창이 가려져도 메트로놈의 선행 스케줄러가 느려지지 않게 유지합니다.
+      backgroundThrottling: false,
     },
   });
 

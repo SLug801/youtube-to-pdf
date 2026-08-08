@@ -7,6 +7,13 @@ import type {
   RoiPreview,
 } from "../shared/contracts";
 import "./styles.css";
+import { TempoPage } from "./tempo";
+import {
+  applyThemePreference,
+  readThemePreference,
+  SettingsPage,
+  type ThemePreference,
+} from "./settings";
 
 interface RoiBounds {
   top: number;
@@ -16,7 +23,7 @@ interface RoiBounds {
 }
 
 type RoiKey = keyof RoiBounds;
-type WorkspaceView = "extractor" | "tempo";
+type ActiveTool = "converter" | "tempo" | "settings";
 
 const INITIAL_ROI: RoiBounds = {
   top: 0.7,
@@ -32,7 +39,11 @@ function serializeRoi(bounds: RoiBounds): string {
 }
 
 function App(): React.JSX.Element {
-  const [activeView, setActiveView] = useState<WorkspaceView>("extractor");
+  const [activeTool, setActiveTool] = useState<ActiveTool>("tempo");
+  const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.innerWidth < 1440,
+  );
   const [status, setStatus] = useState<BackendStatus | null>(null);
   const [url, setUrl] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
@@ -50,6 +61,18 @@ function App(): React.JSX.Element {
   const [result, setResult] = useState<ConversionResult | null>(null);
   const [error, setError] = useState("");
   const [logsOpen, setLogsOpen] = useState(false);
+
+  useEffect(() => {
+    applyThemePreference(theme);
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateSystemTheme = (): void => {
+      if (theme === "system") {
+        applyThemePreference("system");
+      }
+    };
+    systemTheme.addEventListener("change", updateSystemTheme);
+    return () => systemTheme.removeEventListener("change", updateSystemTheme);
+  }, [theme]);
 
   useEffect(() => {
     window.youtubeToPdf
@@ -166,18 +189,33 @@ function App(): React.JSX.Element {
         : "idle";
 
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell ${activeTool}-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
+    >
       <aside className="app-sidebar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
-          <div>
-            <h1>YouTube to PDF</h1>
-            <p>Music Utility Studio</p>
+        <div className="sidebar-brand">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <div className="brand-copy">
+              <h1>Score Lab</h1>
+              <p>Music Utility Studio</p>
+            </div>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((current) => !current)}
+            aria-label={sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+            title={sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d={sidebarCollapsed ? "m7 5 5 5-5 5" : "m13 5-5 5 5 5"} />
+            </svg>
+          </button>
         </div>
 
         <nav className="sidebar-nav" aria-label="도구 메뉴">
@@ -185,9 +223,10 @@ function App(): React.JSX.Element {
             <p className="nav-label">WORKSPACE</p>
             <button
               type="button"
-              className={`nav-item ${activeView === "extractor" ? "active" : ""}`}
-              onClick={() => setActiveView("extractor")}
-              aria-current={activeView === "extractor" ? "page" : undefined}
+              className={`nav-item ${activeTool === "converter" ? "active" : ""}`}
+              onClick={() => setActiveTool("converter")}
+              aria-current={activeTool === "converter" ? "page" : undefined}
+              title={sidebarCollapsed ? "악보 추출" : undefined}
             >
               <span className="nav-icon score-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -202,9 +241,10 @@ function App(): React.JSX.Element {
             </button>
             <button
               type="button"
-              className={`nav-item ${activeView === "tempo" ? "active" : ""}`}
-              onClick={() => setActiveView("tempo")}
-              aria-current={activeView === "tempo" ? "page" : undefined}
+              className={`nav-item ${activeTool === "tempo" ? "active" : ""}`}
+              onClick={() => setActiveTool("tempo")}
+              aria-current={activeTool === "tempo" ? "page" : undefined}
+              title={sidebarCollapsed ? "템포 랩" : undefined}
             >
               <span className="nav-icon tempo-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -214,25 +254,31 @@ function App(): React.JSX.Element {
               </span>
               <span className="nav-copy">
                 <strong>템포 랩</strong>
-                <small>드럼 템포 도구</small>
+                <small>정밀 메트로놈과 연습 도구</small>
               </span>
-              <span className="nav-badge">준비 중</span>
             </button>
           </div>
 
           <div className="nav-group secondary-nav">
-            <p className="nav-label">LIBRARY</p>
-            <div className="nav-item muted" aria-disabled="true">
-              <span className="nav-icon" aria-hidden="true">
+            <p className="nav-label">SYSTEM</p>
+            <button
+              type="button"
+              className={`nav-item ${activeTool === "settings" ? "active" : ""}`}
+              onClick={() => setActiveTool("settings")}
+              aria-current={activeTool === "settings" ? "page" : undefined}
+              title={sidebarCollapsed ? "설정" : undefined}
+            >
+              <span className="nav-icon settings-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
-                  <path d="M5 5.5h14v13H5zM8 9h8M8 13h5" />
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-5L9 6.1a8 8 0 0 0-1.7 1l-2.4-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.7 1l.4 3.1h5l.4-3.1a8 8 0 0 0 1.7-1l2.4 1 2-3.4-2.1-1.5a7 7 0 0 0 .1-1Z" />
                 </svg>
               </span>
               <span className="nav-copy">
-                <strong>최근 작업</strong>
-                <small>변환 기록 모아보기</small>
+                <strong>설정</strong>
+                <small>테마와 앱 환경 설정</small>
               </span>
-            </div>
+            </button>
           </div>
         </nav>
 
@@ -253,19 +299,21 @@ function App(): React.JSX.Element {
       <section className="app-content">
         <header className="app-header">
           <div className="page-title">
-            <p>도구 / {activeView === "extractor" ? "악보 추출" : "템포 랩"}</p>
-            <h2>{activeView === "extractor" ? "악보 추출" : "템포 랩"}</h2>
+            <p>
+              {activeTool === "settings" ? "시스템" : "도구"} / {activeTool === "converter" ? "악보 추출" : activeTool === "tempo" ? "템포 랩" : "설정"}
+            </p>
+            <h2>{activeTool === "converter" ? "악보 추출" : activeTool === "tempo" ? "템포 랩" : "설정"}</h2>
           </div>
           <div className="header-note">
             <span
-              className={activeView === "extractor" ? "blue" : "orange"}
+              className={activeTool === "settings" ? "settings" : "blue"}
               aria-hidden="true"
             />
-            {activeView === "extractor" ? "VIDEO TO SCORE" : "DRUM PRACTICE"}
+            {activeTool === "converter" ? "VIDEO TO SCORE" : activeTool === "tempo" ? "DRUM PRACTICE" : "APP SETTINGS"}
           </div>
         </header>
 
-        {activeView === "extractor" ? (
+        {activeTool === "converter" ? (
           <form className="workbench" onSubmit={startConversion}>
             <aside className="settings-pane">
               <div className="pane-heading">
@@ -556,110 +604,38 @@ function App(): React.JSX.Element {
               </div>
             </section>
           </form>
+        ) : activeTool === "tempo" ? (
+          <TempoPage />
         ) : (
-          <section className="tempo-page" aria-label="템포 랩 준비 화면">
-            <div className="tempo-hero">
-              <div className="tempo-hero-copy">
-                <span className="coming-pill">
-                  <i aria-hidden="true" /> COMING NEXT
-                </span>
-                <h2>
-                  연습의 박자를
-                  <br />
-                  눈에 보이게.
-                </h2>
-                <p>
-                  드럼 영상의 템포를 찾고, 구간마다 달라지는 BPM을 기록하는 연습
-                  도구를 이곳에 확장할 수 있습니다.
-                </p>
-                <div className="tempo-tags" aria-label="계획 중인 기능">
-                  <span>BPM 측정</span>
-                  <span>탭 템포</span>
-                  <span>구간 분석</span>
-                </div>
-              </div>
-              <div className="tempo-visual" aria-hidden="true">
-                <div className="beat-ring ring-one" />
-                <div className="beat-ring ring-two" />
-                <div className="tempo-dial">
-                  <span>♩</span>
-                  <strong>120</strong>
-                  <small>BPM</small>
-                </div>
-                <span className="beat-dot dot-one" />
-                <span className="beat-dot dot-two" />
-                <span className="beat-dot dot-three" />
-              </div>
-            </div>
-
-            <div className="future-tools">
-              <article className="future-card mint">
-                <span className="future-number">01</span>
-                <div className="future-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M4 14h3l2-7 4 11 2-7 2 3h3" />
-                  </svg>
-                </div>
-                <h3>탭 템포</h3>
-                <p>박자에 맞춰 키를 두드리면 현재 BPM을 빠르게 계산합니다.</p>
-              </article>
-              <article className="future-card violet">
-                <span className="future-number">02</span>
-                <div className="future-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M5 18V9M10 18V5M15 18v-6M20 18V8" />
-                  </svg>
-                </div>
-                <h3>템포 맵</h3>
-                <p>영상 구간별 BPM 변화를 타임라인 위에서 비교합니다.</p>
-              </article>
-              <article className="future-card coral">
-                <span className="future-number">03</span>
-                <div className="future-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="7" />
-                    <path d="M12 8v4l3 2" />
-                  </svg>
-                </div>
-                <h3>연습 루프</h3>
-                <p>어려운 마디를 선택하고 목표 템포까지 반복 연습합니다.</p>
-              </article>
-            </div>
-
-            <div className="tempo-roadmap">
-              <div>
-                <span>PRODUCT NOTE</span>
-                <h3>악보 추출 다음의 자연스러운 흐름</h3>
-              </div>
-              <p>
-                추출한 악보와 원본 영상의 타임라인을 연결하면, 이후에는 마디별
-                템포와 연습 기록까지 하나의 프로젝트로 관리할 수 있습니다.
-              </p>
-              <span className="roadmap-status">기능 설계 중</span>
-            </div>
-          </section>
+          <SettingsPage theme={theme} onThemeChange={setTheme} />
         )}
 
-        <footer className={`activity-bar ${activityKind}`}>
-          <div className="activity-message" title={activityMessage}>
-            <span className="activity-indicator" />
-            <span>{activityMessage}</span>
-          </div>
-          <button
-            type="button"
-            className={`log-toggle ${logsOpen ? "active" : ""}`}
-            onClick={() => setLogsOpen((current) => !current)}
-            aria-expanded={logsOpen}
-          >
-            처리 로그
-            <span>{logs.length}</span>
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d={logsOpen ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} />
-            </svg>
-          </button>
-        </footer>
+        {activeTool === "converter" ? (
+          <footer className={`activity-bar ${activityKind}`}>
+            <div className="activity-message" title={activityMessage}>
+              <span className="activity-indicator" />
+              <span>{activityMessage}</span>
+            </div>
+            <button
+              type="button"
+              className={`log-toggle ${logsOpen ? "active" : ""}`}
+              onClick={() => setLogsOpen((current) => !current)}
+              aria-expanded={logsOpen}
+            >
+              처리 로그
+              <span>{logs.length}</span>
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d={logsOpen ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} />
+              </svg>
+            </button>
+          </footer>
+        ) : activeTool === "settings" ? (
+          <footer className="settings-footer">
+            테마와 사용자 설정은 현재 기기에 저장됩니다.
+          </footer>
+        ) : null}
 
-        {logsOpen && (
+        {activeTool === "converter" && logsOpen && (
           <section className="log-drawer" aria-label="처리 로그">
             <div className="log-heading">
               <div>
