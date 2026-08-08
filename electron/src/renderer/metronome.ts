@@ -1,6 +1,20 @@
 export type AccentLevel = 0 | 1 | 2;
 
-export type ClickSound = 'classic' | 'wood' | 'electronic';
+export type ClickSound =
+  | 'classic'
+  | 'wood'
+  | 'electronic'
+  | 'studio'
+  | 'live'
+  | 'rim'
+  | 'clave'
+  | 'cowbell'
+  | 'hihat'
+  | 'shaker'
+  | 'beep'
+  | 'pulse'
+  | 'soft'
+  | 'deep';
 
 export interface MetronomeConfig {
   bpm: number;
@@ -9,9 +23,12 @@ export interface MetronomeConfig {
   accents: AccentLevel[];
   volume: number;
   sound: ClickSound;
+  pan: number;
+  muted: boolean;
   gapEnabled: boolean;
   audibleBars: number;
   mutedBars: number;
+  countInBars: number;
 }
 
 export interface TickEvent {
@@ -19,6 +36,15 @@ export interface TickEvent {
   beat: number;
   subdivision: number;
   audible: boolean;
+  countIn: boolean;
+}
+
+interface SoundProfile {
+  normal: number;
+  accent: number;
+  wave: OscillatorType;
+  duration: number;
+  level: number;
 }
 
 type ConfigReader = () => MetronomeConfig;
@@ -26,6 +52,23 @@ type TickListener = (event: TickEvent) => void;
 
 const LOOK_AHEAD_MS = 25;
 const SCHEDULE_AHEAD_SECONDS = 0.1;
+
+const SOUND_PROFILES: Record<ClickSound, SoundProfile> = {
+  classic: { normal: 920, accent: 1480, wave: 'sine', duration: 0.03, level: 1 },
+  wood: { normal: 640, accent: 1050, wave: 'triangle', duration: 0.045, level: 0.95 },
+  electronic: { normal: 1200, accent: 1880, wave: 'square', duration: 0.03, level: 0.72 },
+  studio: { normal: 1080, accent: 1620, wave: 'triangle', duration: 0.025, level: 0.9 },
+  live: { normal: 1500, accent: 2300, wave: 'square', duration: 0.022, level: 0.8 },
+  rim: { normal: 1350, accent: 2050, wave: 'triangle', duration: 0.018, level: 0.86 },
+  clave: { normal: 1760, accent: 2480, wave: 'sine', duration: 0.026, level: 0.82 },
+  cowbell: { normal: 560, accent: 840, wave: 'square', duration: 0.055, level: 0.62 },
+  hihat: { normal: 3400, accent: 4700, wave: 'sawtooth', duration: 0.016, level: 0.42 },
+  shaker: { normal: 2700, accent: 3600, wave: 'sawtooth', duration: 0.012, level: 0.35 },
+  beep: { normal: 880, accent: 1320, wave: 'sine', duration: 0.06, level: 0.82 },
+  pulse: { normal: 440, accent: 660, wave: 'square', duration: 0.035, level: 0.58 },
+  soft: { normal: 720, accent: 1120, wave: 'sine', duration: 0.055, level: 0.7 },
+  deep: { normal: 220, accent: 330, wave: 'triangle', duration: 0.075, level: 0.9 },
+};
 
 export class MetronomeEngine {
   private context: AudioContext | null = null;
@@ -93,18 +136,23 @@ export class MetronomeEngine {
     const ticksPerBar = config.beatsPerBar * config.subdivision;
     const beat = Math.floor(this.tickIndex / config.subdivision);
     const subdivision = this.tickIndex % config.subdivision;
+    const countIn = this.barIndex < config.countInBars;
+    const practiceBar = Math.max(0, this.barIndex - config.countInBars);
     const gapCycle = Math.max(1, config.audibleBars + config.mutedBars);
-    const audible = !config.gapEnabled
-      || this.barIndex % gapCycle < config.audibleBars;
+    const audible = countIn || !config.gapEnabled
+      || practiceBar % gapCycle < config.audibleBars;
     const visualEvent: TickEvent = {
-      bar: this.barIndex,
+      bar: practiceBar,
       beat,
       subdivision,
       audible,
+      countIn,
     };
 
-    if (audible) {
-      const level = subdivision === 0 ? config.accents[beat] ?? 1 : 1;
+    if (audible && !config.muted) {
+      const level = subdivision === 0
+        ? countIn && beat === 0 ? 2 : config.accents[beat] ?? 1
+        : 1;
       if (level > 0) {
         this.createClick(at, level, subdivision > 0, config);
       }
@@ -133,26 +181,25 @@ export class MetronomeEngine {
     if (!this.context) {
       return;
     }
+    const profile = SOUND_PROFILES[config.sound];
     const oscillator = this.context.createOscillator();
     const gain = this.context.createGain();
-    const soundFrequencies: Record<ClickSound, [number, number, OscillatorType]> = {
-      classic: [920, 1480, 'sine'],
-      wood: [640, 1050, 'triangle'],
-      electronic: [1200, 1880, 'square'],
-    };
-    const [normalFrequency, accentFrequency, wave] = soundFrequencies[config.sound];
-    oscillator.type = wave;
+    const panner = this.context.createStereoPanner();
+    oscillator.type = profile.wave;
     oscillator.frequency.setValueAtTime(
-      level === 2 ? accentFrequency : normalFrequency,
+      level === 2 ? profile.accent : profile.normal,
       at,
     );
 
-    const baseGain = config.volume * (isSubdivision ? 0.22 : level === 2 ? 0.72 : 0.46);
+    const emphasis = isSubdivision ? 0.22 : level === 2 ? 0.72 : 0.46;
+    const baseGain = config.volume * profile.level * emphasis;
     gain.gain.setValueAtTime(Math.max(0.0001, baseGain), at);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + (config.sound === 'wood' ? 0.045 : 0.03));
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + profile.duration);
+    panner.pan.setValueAtTime(Math.min(1, Math.max(-1, config.pan)), at);
     oscillator.connect(gain);
-    gain.connect(this.context.destination);
+    gain.connect(panner);
+    panner.connect(this.context.destination);
     oscillator.start(at);
-    oscillator.stop(at + 0.05);
+    oscillator.stop(at + profile.duration + 0.01);
   }
 }

@@ -8,6 +8,12 @@ import type {
 } from '../shared/contracts';
 import './styles.css';
 import { TempoPage } from './tempo';
+import {
+  applyThemePreference,
+  readThemePreference,
+  SettingsPage,
+  type ThemePreference,
+} from './settings';
 
 interface RoiBounds {
   top: number;
@@ -17,6 +23,7 @@ interface RoiBounds {
 }
 
 type RoiKey = keyof RoiBounds;
+type ActiveTool = 'converter' | 'tempo' | 'settings';
 
 const INITIAL_ROI: RoiBounds = {
   top: 0.7,
@@ -32,7 +39,8 @@ function serializeRoi(bounds: RoiBounds): string {
 }
 
 function App(): React.JSX.Element {
-  const [activeTool, setActiveTool] = useState<'converter' | 'tempo'>('tempo');
+  const [activeTool, setActiveTool] = useState<ActiveTool>('tempo');
+  const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [status, setStatus] = useState<BackendStatus | null>(null);
   const [url, setUrl] = useState('');
   const [outputDirectory, setOutputDirectory] = useState('');
@@ -49,6 +57,18 @@ function App(): React.JSX.Element {
   const [result, setResult] = useState<ConversionResult | null>(null);
   const [error, setError] = useState('');
   const [logsOpen, setLogsOpen] = useState(false);
+
+  useEffect(() => {
+    applyThemePreference(theme);
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+    const updateSystemTheme = (): void => {
+      if (theme === 'system') {
+        applyThemePreference('system');
+      }
+    };
+    systemTheme.addEventListener('change', updateSystemTheme);
+    return () => systemTheme.removeEventListener('change', updateSystemTheme);
+  }, [theme]);
 
   useEffect(() => {
     window.youtubeToPdf.getBackendStatus().then(setStatus).catch((reason: Error) => {
@@ -159,7 +179,7 @@ function App(): React.JSX.Element {
         : 'idle';
 
   return (
-    <main className={`app-shell ${activeTool === 'tempo' ? 'tempo-shell' : ''}`}>
+    <main className={`app-shell ${activeTool}-shell`}>
       <header className="app-header">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
@@ -187,14 +207,23 @@ function App(): React.JSX.Element {
           >
             Tempo
           </button>
+          <button
+            type="button"
+            className={activeTool === 'settings' ? 'active' : ''}
+            onClick={() => setActiveTool('settings')}
+          >
+            설정
+          </button>
         </nav>
         {activeTool === 'converter' ? (
           <div className={`backend-status ${status?.ready ? 'ready' : 'waiting'}`}>
             <span className="status-dot" />
             {status?.ready ? '백엔드 준비됨' : '백엔드 확인 중'}
           </div>
-        ) : (
+        ) : activeTool === 'tempo' ? (
           <div className="tempo-header-label"><span />DRUM PRACTICE</div>
+        ) : (
+          <div className="settings-header-label"><span />APP SETTINGS</div>
         )}
       </header>
 
@@ -516,8 +545,15 @@ function App(): React.JSX.Element {
         </section>
       )}
         </>
-      ) : (
+      ) : activeTool === 'tempo' ? (
         <TempoPage />
+      ) : (
+        <>
+          <SettingsPage theme={theme} onThemeChange={setTheme} />
+          <footer className="settings-footer">
+            테마와 사용자 설정은 현재 기기에 저장됩니다.
+          </footer>
+        </>
       )}
     </main>
   );

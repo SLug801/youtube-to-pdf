@@ -2,24 +2,47 @@
   color-scheme: light;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
-  background: #f2f2ef;
-  color: #20211f;
+  background: #edf2f5;
+  color: #17232d;
   font-synthesis: none;
-  --canvas: #f2f2ef;
-  --surface: #ffffff;
-  --surface-muted: #f7f7f4;
-  --surface-hover: #f0f0ec;
-  --line: #deded8;
-  --line-strong: #c7c7c0;
-  --text: #20211f;
-  --text-soft: #686a66;
-  --text-faint: #92948f;
-  --accent: #315ec9;
-  --accent-dark: #244cae;
-  --accent-soft: #edf2ff;
-  --success: #23814d;
-  --danger: #b43d3d;
-  --preview: #1b1c1a;
+  --canvas: #edf2f5;
+  --surface: #fbfcfd;
+  --surface-muted: #f3f6f8;
+  --surface-hover: #e9eff3;
+  --header: rgba(251, 252, 253, 0.96);
+  --line: #d4dee5;
+  --line-strong: #b8c6d0;
+  --text: #17232d;
+  --text-soft: #586977;
+  --text-faint: #84939e;
+  --accent: #285b82;
+  --accent-dark: #1d4667;
+  --accent-soft: #e4edf4;
+  --success: #2d7655;
+  --danger: #ad4747;
+  --preview: #111820;
+  --shadow-soft: 0 7px 22px rgba(27, 48, 64, 0.07);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0e151b;
+  --surface: #151f27;
+  --surface-muted: #1a2630;
+  --surface-hover: #21303b;
+  --header: rgba(18, 27, 35, 0.96);
+  --line: #2a3a46;
+  --line-strong: #415563;
+  --text: #e7edf1;
+  --text-soft: #a7b4bd;
+  --text-faint: #71828e;
+  --accent: #739bbb;
+  --accent-dark: #8aafca;
+  --accent-soft: #203444;
+  --success: #62a17f;
+  --danger: #d77a7a;
+  --preview: #080d11;
+  --shadow-soft: 0 9px 26px rgba(0, 0, 0, 0.2);
 }
 
 * {
@@ -86,7 +109,7 @@ p {
   min-width: 0;
   border-bottom: 1px solid var(--line);
   padding: 0 20px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--header);
   -webkit-app-region: drag;
 }
 
@@ -127,63 +150,59 @@ p {
   box-shadow: 0 1px 3px rgba(24, 25, 23, 0.12);
 }
 
-.tempo-shell .app-header {
-  border-color: #30342b;
-  background: #171a15;
-  color: #f2f4ed;
-}
-
 .tempo-shell .brand-mark {
-  background: #c9ff3d;
+  background: var(--accent);
 }
 
 .tempo-shell .brand-mark span,
 .tempo-shell .brand-mark::after {
-  background: #171a15;
+  background: var(--surface);
 }
 
 .tempo-shell .brand-mark::after {
-  box-shadow: 0 -7px 0 -1px #171a15;
+  box-shadow: 0 -7px 0 -1px var(--surface);
 }
 
 .tempo-shell .brand p {
-  color: #747a6d;
+  color: var(--text-faint);
 }
 
 .tempo-shell .tool-navigation {
-  border-color: #34382f;
-  background: #11130f;
+  border-color: var(--line);
+  background: var(--surface-muted);
 }
 
 .tempo-shell .tool-navigation button {
-  color: #777d70;
+  color: var(--text-faint);
 }
 
 .tempo-shell .tool-navigation button:hover {
-  color: #eff2e9;
+  color: var(--text);
 }
 
 .tempo-shell .tool-navigation button.active {
-  background: #292e23;
-  color: #c9ff3d;
-  box-shadow: none;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-.tempo-header-label {
+.tempo-header-label,
+.settings-header-label {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #747a6d;
+  color: var(--text-faint);
   font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.12em;
 }
 
-.tempo-header-label span {
+.tempo-header-label span,
+.settings-header-label span {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #c9ff3d;
-  box-shadow: 0 0 7px rgba(201, 255, 61, 0.48);
+  background: var(--accent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--accent) 48%, transparent);
 }
 
 .brand {
@@ -948,6 +967,49 @@ p {
   font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   scrollbar-color: #555850 #171816;
   white-space: pre-wrap;
+}
+
+:root[data-theme="dark"] .settings-pane,
+:root[data-theme="dark"] .preview-pane,
+:root[data-theme="dark"] .activity-bar {
+  background: var(--surface);
+}
+
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .choice-button,
+:root[data-theme="dark"] .preview-button,
+:root[data-theme="dark"] .cancel-button {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .choice-button.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] .choice-button.selected small {
+  color: var(--accent-dark);
+}
+
+:root[data-theme="dark"] .preview-workspace {
+  background:
+    linear-gradient(color-mix(in srgb, var(--line) 40%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 40%, transparent) 1px, transparent 1px),
+    #111a21;
+  background-size: 16px 16px;
+}
+
+:root[data-theme="dark"] .viewfinder {
+  border-color: var(--line-strong);
+}
+
+:root[data-theme="dark"] .log-drawer {
+  border-color: var(--line);
+  background: #0a1015;
+  color: var(--text);
 }
 
 @media (max-height: 680px) {
