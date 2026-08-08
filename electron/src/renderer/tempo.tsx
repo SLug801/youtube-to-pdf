@@ -110,7 +110,7 @@ function readPresets(): TempoPreset[] {
           ? Array.from({ length: beatsPerBar }, (_, beat) => preset.accents?.[beat] ?? (beat === 0 ? 2 : 1))
           : Array.from({ length: beatsPerBar }, (_, beat) => beat === 0 ? 2 : 1),
         sound: SOUND_OPTIONS.some(([sound]) => sound === preset.sound) ? preset.sound ?? 'classic' : 'classic',
-        volume: Math.min(1, Math.max(0, preset.volume ?? 0.8)),
+        volume: Math.min(2, Math.max(0, preset.volume ?? 0.8)),
         pan: Math.min(1, Math.max(-1, preset.pan ?? 0)),
         gapEnabled: preset.gapEnabled ?? false,
         audibleBars: clampInteger(preset.audibleBars ?? 2, 1, 16),
@@ -170,7 +170,9 @@ export function TempoPage(): React.JSX.Element {
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
   const [pitchCalibration, setPitchCalibration] = useState(440);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(
+    () => window.innerWidth >= 1600,
+  );
 
   const tapTimes = useRef<number[]>([]);
   const startedAt = useRef(0);
@@ -319,6 +321,41 @@ export function TempoPage(): React.JSX.Element {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
+
+  useEffect(() => {
+    const compactLayout = window.matchMedia('(max-width: 1599px)');
+    const updatePanelLayout = (event: MediaQueryListEvent): void => {
+      if (event.matches) {
+        setLeftPanelOpen(true);
+        setRightPanelOpen(false);
+      } else {
+        setLeftPanelOpen(true);
+        setRightPanelOpen(true);
+      }
+    };
+    compactLayout.addEventListener('change', updatePanelLayout);
+    return () => compactLayout.removeEventListener('change', updatePanelLayout);
+  }, []);
+
+  const toggleLeftPanel = (): void => {
+    setLeftPanelOpen((current) => {
+      const next = !current;
+      if (next && window.innerWidth < 1600) {
+        setRightPanelOpen(false);
+      }
+      return next;
+    });
+  };
+
+  const toggleRightPanel = (): void => {
+    setRightPanelOpen((current) => {
+      const next = !current;
+      if (next && window.innerWidth < 1600) {
+        setLeftPanelOpen(false);
+      }
+      return next;
+    });
+  };
 
   const start = useCallback(async (): Promise<void> => {
     setBarCount(0);
@@ -602,7 +639,7 @@ export function TempoPage(): React.JSX.Element {
           <button
             type="button"
             className="panel-toggle panel-toggle-left"
-            onClick={() => setLeftPanelOpen((current) => !current)}
+            onClick={toggleLeftPanel}
             aria-label={leftPanelOpen ? '연습 도구 패널 닫기' : '연습 도구 패널 열기'}
             aria-expanded={leftPanelOpen}
             title={leftPanelOpen ? '연습 도구 접기' : '연습 도구 펼치기'}
@@ -612,7 +649,7 @@ export function TempoPage(): React.JSX.Element {
           <button
             type="button"
             className="panel-toggle panel-toggle-right"
-            onClick={() => setRightPanelOpen((current) => !current)}
+            onClick={toggleRightPanel}
             aria-label={rightPanelOpen ? '박자 설정 패널 닫기' : '박자 설정 패널 열기'}
             aria-expanded={rightPanelOpen}
             title={rightPanelOpen ? '박자 설정 접기' : '박자 설정 펼치기'}
@@ -686,7 +723,8 @@ export function TempoPage(): React.JSX.Element {
               <button type="button" className={muted ? 'selected' : ''} onClick={() => setMuted((current) => !current)}>{muted ? '음소거됨' : '음소거'}</button>
               <button type="button" className={voiceCountEnabled ? 'selected' : ''} onClick={() => setVoiceCountEnabled((current) => !current)}>음성 카운트</button>
             </div>
-            <label className="volume-control"><span>볼륨</span><input type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><output>{Math.round(volume * 100)}</output></label>
+              <label className="volume-control"><span>출력</span><input type="range" min="0" max="2" step="0.01" value={volume} onChange={(event) => setVolume(Number(event.target.value))} /><output>{Math.round(volume * 100)}%</output></label>
+              {volume > 1 && <p className="output-boost-note">출력 부스트가 켜졌습니다. 피크 보호를 적용합니다.</p>}
             <label className="volume-control"><span>패닝</span><input type="range" min="-1" max="1" step="0.01" value={pan} onChange={(event) => setPan(Number(event.target.value))} /><output>{pan === 0 ? 'C' : pan < 0 ? `L${Math.round(Math.abs(pan) * 100)}` : `R${Math.round(pan * 100)}`}</output></label>
           </section>
 

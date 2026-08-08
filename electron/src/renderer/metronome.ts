@@ -72,6 +72,7 @@ const SOUND_PROFILES: Record<ClickSound, SoundProfile> = {
 
 export class MetronomeEngine {
   private context: AudioContext | null = null;
+  private outputCompressor: DynamicsCompressorNode | null = null;
   private timer: number | null = null;
   private nextTickTime = 0;
   private tickIndex = 0;
@@ -87,7 +88,16 @@ export class MetronomeEngine {
     if (this.timer !== null) {
       return;
     }
-    this.context ??= new AudioContext();
+    if (!this.context) {
+      this.context = new AudioContext();
+      this.outputCompressor = this.context.createDynamicsCompressor();
+      this.outputCompressor.threshold.value = -1;
+      this.outputCompressor.knee.value = 2;
+      this.outputCompressor.ratio.value = 20;
+      this.outputCompressor.attack.value = 0.002;
+      this.outputCompressor.release.value = 0.12;
+      this.outputCompressor.connect(this.context.destination);
+    }
     await this.context.resume();
     this.tickIndex = 0;
     this.barIndex = 0;
@@ -114,6 +124,7 @@ export class MetronomeEngine {
     if (this.context) {
       void this.context.close();
       this.context = null;
+      this.outputCompressor = null;
     }
   }
 
@@ -198,7 +209,7 @@ export class MetronomeEngine {
     panner.pan.setValueAtTime(Math.min(1, Math.max(-1, config.pan)), at);
     oscillator.connect(gain);
     gain.connect(panner);
-    panner.connect(this.context.destination);
+    panner.connect(this.outputCompressor ?? this.context.destination);
     oscillator.start(at);
     oscillator.stop(at + profile.duration + 0.01);
   }
