@@ -1,8 +1,15 @@
 target/
 build/
-.gradle/
+node_modules/
+.webpack/
+out/
 dist/
 dist-input/
+python-backend/.venv/
+python-backend/.mypy_cache/
+python-backend/.pytest_cache/
+python-backend/.ruff_cache/
+python-backend/**/__pycache__/
 sheet_*/
 ocr_debug_*.png
 *.class
@@ -14,3 +21,6 @@ youtube-to-pdf/
 .vscode/
 .serena/
 CLAUDE.md
+
+# Electron 패키징 시 생성되는 Python 백엔드 스테이징 파일
+electron/resources/backend/
