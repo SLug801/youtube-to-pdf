@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  shell,
   type IpcMainInvokeEvent,
 } from 'electron';
 import fs from 'node:fs';
@@ -12,6 +13,7 @@ import type {
   BackendEvent,
   ConversionRequest,
   PreviewRequest,
+  StemSeparationRequest,
 } from '../shared/contracts';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
@@ -76,6 +78,41 @@ function validateOutputDirectory(value: unknown): string {
     throw new Error('출력 폴더를 다시 선택해 주세요.');
   }
   return path.resolve(value);
+}
+
+const STEM_EXTENSIONS = new Set([
+  '.aac', '.aiff', '.flac', '.m4a', '.mkv', '.mov',
+  '.mp3', '.mp4', '.ogg', '.wav', '.webm',
+]);
+
+function validateStemInputFile(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new Error('입력 파일을 다시 선택해 주세요.');
+  }
+  const resolved = path.resolve(value);
+  if (!fs.statSync(resolved, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error('입력 파일을 찾을 수 없습니다.');
+  }
+  if (!STEM_EXTENSIONS.has(path.extname(resolved).toLowerCase())) {
+    throw new Error('지원하는 음원 또는 영상 파일을 선택해 주세요.');
+  }
+  return resolved;
+}
+
+function validateStemRequest(value: unknown): StemSeparationRequest {
+  if (!value || typeof value !== 'object') {
+    throw new Error('음원 분리 요청 형식이 올바르지 않습니다.');
+  }
+  const request = value as Partial<StemSeparationRequest>;
+  const model = request.model ?? 'htdemucs';
+  if (!['htdemucs', 'htdemucs_6s'].includes(model)) {
+    throw new Error('지원하지 않는 음원 분리 모델입니다.');
+  }
+  return {
+    inputPath: validateStemInputFile(request.inputPath),
+    outputDirectory: validateOutputDirectory(request.outputDirectory),
+    model,
+  };
 }
 
 function validateRequest(value: unknown): ConversionRequest {
@@ -149,6 +186,57 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory'],
     });
     return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('stems:select-input', async (event) => {
+    requireTrustedSender(event);
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '분리할 음원 또는 영상 선택',
+      defaultPath: app.getPath('music'),
+      properties: ['openFile'],
+      filters: [
+        {
+          name: '음원 및 영상',
+          extensions: [...STEM_EXTENSIONS].map((extension) => extension.slice(1)),
+        },
+      ],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('stems:select-output', async (event) => {
+    requireTrustedSender(event);
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '분리 결과를 저장할 폴더 선택',
+      defaultPath: app.getPath('music'),
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('stems:capability', (event) => {
+    requireTrustedSender(event);
+    return backend.stemCapability();
+  });
+
+  ipcMain.handle('stems:start', (event, value: unknown) => {
+    requireTrustedSender(event);
+    const request = validateStemRequest(value);
+    const emit = (backendEvent: BackendEvent): void => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('backend:event', backendEvent);
+      }
+    };
+    return backend.startStemSeparation(request, emit);
+  });
+
+  ipcMain.handle('local:open-directory', async (event, value: unknown) => {
+    requireTrustedSender(event);
+    const directory = validateOutputDirectory(value);
+    const error = await shell.openPath(directory);
+    if (error) {
+      throw new Error(`폴더를 열 수 없습니다: ${error}`);
+    }
   });
 
   ipcMain.handle('backend:preview', (event, value: unknown) => {

@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request,
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from core.stem_separator import is_stem_separator_available
+
 from .engine import ConversionEngine, PythonEngine
 from .jobs import EngineUnavailableError, JobConflictError, JobManager
 from .previews import generate_preview
@@ -20,6 +22,8 @@ from .schemas import (
     HealthResponse,
     JobResponse,
     PreviewRequest,
+    StemCapabilityResponse,
+    StemSeparationRequest,
 )
 from .settings import Settings
 
@@ -91,6 +95,44 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="프리뷰 생성 중에는 변환 작업을 시작할 수 없습니다.",
+            )
+        try:
+            async with operation_lock:
+                return await job_manager.submit(body)
+        except EngineUnavailableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(error),
+            ) from error
+        except JobConflictError as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    @router.get("/api/v1/stems/capability", response_model=StemCapabilityResponse)
+    async def stem_capability() -> StemCapabilityResponse:
+        available = is_stem_separator_available()
+        return StemCapabilityResponse(
+            available=available,
+            message=(
+                "로컬 AI 음원 분리 엔진을 사용할 수 있습니다."
+                if available
+                else "AI 음원 분리 구성요소가 아직 설치되지 않았습니다."
+            ),
+            models=["htdemucs", "htdemucs_6s"],
+        )
+
+    @router.post(
+        "/api/v1/stems/jobs",
+        response_model=JobResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_stem_job(
+        body: StemSeparationRequest,
+        job_manager: Annotated[JobManager, Depends(get_manager)],
+    ) -> JobResponse:
+        if operation_lock.locked():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="다른 작업을 준비하고 있습니다.",
             )
         try:
             async with operation_lock:

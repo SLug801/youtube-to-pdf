@@ -22,6 +22,7 @@ pdf 추출 예 ( 반투명, 스크롤 영상 기준 )
 
 ## 주요 기능
 
+- **Stem Lab** — 로컬 음원·영상에서 보컬·드럼·베이스·반주 4트랙 또는 기타·피아노를 포함한 실험 6트랙을 AI로 분리
 - **드럼 연습용 Tempo** — 10~800 BPM 정밀 클릭, 탭 템포, 확장 박자표·리듬 분할·박별 악센트, 카운트인·자동 정지, 갭/스피드 트레이너, 세트리스트·피치 파이프
 - **화면 테마** — 설정 화면에서 시스템·라이트·다크 모드를 선택하고 기기에 저장
 - 유튜브 URL만 넣으면 다운로드 → 프레임 분석 → 스티칭 → PDF까지 자동
@@ -130,6 +131,7 @@ ReportLab으로 저장된 조각을 하나의 PDF로 출력
 | Node.js | Electron 개발 시 필요 |
 | yt-dlp | **PATH에 설치 필요** (Windows 배포용 실행 파일은 `electron/vendor/yt-dlp.exe`) |
 | FFmpeg | **별도 설치 불필요** — OpenCV Python wheel의 비디오 디코더 사용 |
+| Stem Lab AI | 선택 설치 — Demucs 4.0.1·PyTorch·PyAV 사용, 첫 분리 시 모델 다운로드 |
 | OS | **macOS·Windows·Linux** — 빌드 OS에 맞는 Python/OpenCV 바이너리를 패키징 |
 
 설치 예: `pip install yt-dlp` / `winget install yt-dlp` (Windows) / `brew install yt-dlp` (macOS)
@@ -148,6 +150,9 @@ npm install
 cd ../python-backend
 uv sync --extra dev
 
+# Stem Lab까지 사용할 경우 AI 의존성 추가
+uv sync --extra dev --extra stem
+
 # 개발 실행
 cd ../electron
 npm start
@@ -161,7 +166,9 @@ npm run package
 
 Electron Main 프로세스가 인증 토큰과 임의의 loopback 포트로 FastAPI sidecar를 기동하고,
 FastAPI가 별도 Python OpenCV Worker를 실행합니다.
-Electron 상단에서 `악보 변환`, `Tempo`, `설정`을 전환할 수 있습니다. Tempo에는 BPM(10~800),
+Electron 사이드바에서 `악보 추출`, `Tempo`, `Stem Lab`, `설정`을 전환할 수 있습니다. Stem Lab은
+서버 업로드 없이 로컬 음원·영상을 보컬·드럼·베이스·나머지 4트랙으로 분리하며, 실험 모델에서는
+기타·피아노를 추가한 6트랙 분리를 제공합니다. 첫 실행 시 Demucs 모델을 내려받을 수 있습니다. Tempo에는 BPM(10~800),
 탭 템포, 확장 박자표, 6종 리듬 분할, 박별 악센트/음소거, 2마디 카운트인, 자동 정지,
 갭 트레이너, 시간·마디 기반 자동 속도 증가, 14종 클릭음, 좌우 패닝, 시각 모드,
 로컬 세트리스트 백업·복원과 12음 피치 파이프가 포함됩니다. 설정에서는 시스템·라이트·다크
@@ -184,11 +191,28 @@ uv run pytest
 YTPDF_API_TOKEN=development-token uv run ytpdf-api
 ```
 
-API는 `POST /api/v1/preview`, `POST /api/v1/jobs`, 작업 조회·취소·SSE 이벤트·결과 다운로드를
+API는 `POST /api/v1/preview`, `POST /api/v1/jobs`, `GET /api/v1/stems/capability`,
+`POST /api/v1/stems/jobs`, 작업 조회·취소·SSE 이벤트·결과 다운로드를
 제공합니다. 프리뷰는 `url`, `outputDirectory`, 선택적인 `at` 시각을 받고 JPEG 대표 프레임을
 반환합니다. 작업 요청에서 `roi`, `background`(`translucent`/`opaque`),
 `motion`(`scroll`/`cut`)을 선택할 수 있습니다.
 자세한 내용은 [`python-backend/README.md`](python-backend/README.md)를 참고하세요.
+
+### Stem Lab 개발 실행
+
+```bash
+cd python-backend
+uv sync --extra dev --extra stem
+
+cd ../electron
+npm start
+```
+
+4트랙 모델은 `vocals`, `drums`, `bass`, `other` WAV를 만들고, 6트랙 실험 모델은 `guitar`,
+`piano`를 추가합니다. 결과는 선택한 폴더 아래 `stem-lab/<모델>/<파일명>/`에 저장됩니다.
+음원 분리는 원본 멀티트랙을 복원하는 기능이 아니므로 다른 악기의 소리가 일부 섞일 수 있습니다.
+기본 패키징 명령은 Stem Lab 런타임을 함께 포함하고 AI 모델 가중치는 첫 분리 때 내려받습니다.
+PyTorch가 포함되어 설치 파일이 커지므로 공개 배포 전 플랫폼별 용량과 실행 성능을 확인하세요.
 
 ### Python CLI
 

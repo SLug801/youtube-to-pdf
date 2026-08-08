@@ -18,6 +18,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+stem = [
+    "av>=15,<17",
+    "demucs==4.0.1",
+]
 build = [
     "pyinstaller>=6.13,<7",
 ]

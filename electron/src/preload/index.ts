@@ -4,11 +4,19 @@ import type {
   ConversionRequest,
   ElectronApi,
   PreviewRequest,
+  StemSeparationRequest,
 } from '../shared/contracts';
 
 const api: ElectronApi = {
   getBackendStatus: () => ipcRenderer.invoke('backend:status'),
   selectOutputDirectory: () => ipcRenderer.invoke('output:select-directory'),
+  selectStemInputFile: () => ipcRenderer.invoke('stems:select-input'),
+  selectStemOutputDirectory: () => ipcRenderer.invoke('stems:select-output'),
+  getStemCapability: () => ipcRenderer.invoke('stems:capability'),
+  startStemSeparation: (request: StemSeparationRequest) =>
+    ipcRenderer.invoke('stems:start', request),
+  openLocalDirectory: (directory: string) =>
+    ipcRenderer.invoke('local:open-directory', directory),
   loadPreview: (request: PreviewRequest) =>
     ipcRenderer.invoke('backend:preview', request),
   startConversion: (request: ConversionRequest) =>

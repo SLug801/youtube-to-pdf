@@ -336,6 +336,7 @@ p {
 }
 
 .nav-item.active .tempo-icon,
+.nav-item.active .stems-icon,
 .nav-item.active .settings-icon {
   background: #477fa4;
   color: #ffffff;

@@ -58,6 +58,21 @@ Keep this file together with any redistribution.
     License: GPL v2 or later with the PyInstaller Bootloader Exception
     https://pyinstaller.org/en/stable/license.html
 
+12. Demucs (Stem Lab 선택 설치 구성요소)
+    License: MIT
+    https://github.com/facebookresearch/demucs/blob/main/LICENSE
+
+13. PyTorch / TorchAudio (Stem Lab 선택 설치 구성요소)
+    License: BSD 3-Clause
+    https://github.com/pytorch/pytorch/blob/main/LICENSE
+    https://github.com/pytorch/audio/blob/main/LICENSE
+
+14. PyAV 및 번들 FFmpeg 라이브러리 (Stem Lab 선택 설치 구성요소)
+    PyAV License: BSD 3-Clause
+    FFmpeg libraries: LGPL v2.1 or later (빌드 구성에 따라 개별 라이선스 적용)
+    https://github.com/PyAV-Org/PyAV/blob/main/LICENSE.txt
+    https://ffmpeg.org/legal.html
+
 Apache License 2.0 전문: https://www.apache.org/licenses/LICENSE-2.0
 BSD / GPL 전문은 각 프로젝트 링크를 참조하세요.
 

@@ -52,9 +52,32 @@ export interface ConversionResult {
   message: string;
 }
 
+export type StemModel = 'htdemucs' | 'htdemucs_6s';
+
+export interface StemCapability {
+  available: boolean;
+  message: string;
+  models: StemModel[];
+}
+
+export interface StemSeparationRequest {
+  inputPath: string;
+  outputDirectory: string;
+  model: StemModel;
+}
+
+export interface StemSeparationResult extends ConversionResult {
+  outputPath?: string;
+}
+
 export interface ElectronApi {
   getBackendStatus(): Promise<BackendStatus>;
   selectOutputDirectory(): Promise<string | null>;
+  selectStemInputFile(): Promise<string | null>;
+  selectStemOutputDirectory(): Promise<string | null>;
+  getStemCapability(): Promise<StemCapability>;
+  startStemSeparation(request: StemSeparationRequest): Promise<StemSeparationResult>;
+  openLocalDirectory(directory: string): Promise<void>;
   loadPreview(request: PreviewRequest): Promise<RoiPreview>;
   startConversion(request: ConversionRequest): Promise<ConversionResult>;
   cancelConversion(): Promise<boolean>;

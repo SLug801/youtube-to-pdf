@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     DirectoryPath,
     Field,
+    FilePath,
     HttpUrl,
     field_validator,
     model_validator,
@@ -125,6 +126,48 @@ class PreviewRequest(ApiModel):
         return parse_time_seconds(self.at) if self.at is not None else 5
 
 
+STEM_INPUT_EXTENSIONS = {
+    ".aac",
+    ".aiff",
+    ".flac",
+    ".m4a",
+    ".mkv",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".wav",
+    ".webm",
+}
+
+
+class StemSeparationRequest(ApiModel):
+    input_path: FilePath
+    output_directory: DirectoryPath
+    model: Literal["htdemucs", "htdemucs_6s"] = "htdemucs"
+
+    @field_validator("input_path")
+    @classmethod
+    def validate_input_path(cls, value: Path) -> Path:
+        if value.suffix.lower() not in STEM_INPUT_EXTENSIONS:
+            raise ValueError("지원하는 음원 또는 영상 파일을 선택해 주세요.")
+        return value
+
+    @property
+    def resolved_input_path(self) -> Path:
+        return Path(self.input_path).resolve()
+
+    @property
+    def resolved_output_directory(self) -> Path:
+        return Path(self.output_directory).resolve()
+
+
+class StemCapabilityResponse(ApiModel):
+    available: bool
+    message: str
+    models: list[Literal["htdemucs", "htdemucs_6s"]]
+
+
 class EngineStatus(ApiModel):
     ready: bool
     message: str
@@ -140,6 +183,7 @@ class HealthResponse(ApiModel):
 
 class JobResponse(ApiModel):
     id: UUID
+    kind: Literal["score", "stems"] = "score"
     status: JobStatus
     message: str
     created_at: datetime

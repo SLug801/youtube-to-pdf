@@ -8,6 +8,7 @@ import type {
 } from "../shared/contracts";
 import "./styles.css";
 import { TempoPage } from "./tempo";
+import { StemLabPage } from "./stem-lab";
 import {
   applyThemePreference,
   readThemePreference,
@@ -23,7 +24,7 @@ interface RoiBounds {
 }
 
 type RoiKey = keyof RoiBounds;
-type ActiveTool = "converter" | "tempo" | "settings";
+type ActiveTool = "converter" | "tempo" | "stems" | "settings";
 
 const INITIAL_ROI: RoiBounds = {
   top: 0.7,
@@ -257,6 +258,23 @@ function App(): React.JSX.Element {
                 <small>정밀 메트로놈과 연습 도구</small>
               </span>
             </button>
+            <button
+              type="button"
+              className={`nav-item ${activeTool === "stems" ? "active" : ""}`}
+              onClick={() => setActiveTool("stems")}
+              aria-current={activeTool === "stems" ? "page" : undefined}
+              title={sidebarCollapsed ? "스템 랩" : undefined}
+            >
+              <span className="nav-icon stems-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M5 6v12M10 9v6M15 4v16M20 8v8" />
+                </svg>
+              </span>
+              <span className="nav-copy">
+                <strong>스템 랩</strong>
+                <small>AI 악기별 음원 분리</small>
+              </span>
+            </button>
           </div>
 
           <div className="nav-group secondary-nav">
@@ -300,16 +318,16 @@ function App(): React.JSX.Element {
         <header className="app-header">
           <div className="page-title">
             <p>
-              {activeTool === "settings" ? "시스템" : "도구"} / {activeTool === "converter" ? "악보 추출" : activeTool === "tempo" ? "템포 랩" : "설정"}
+              {activeTool === "settings" ? "시스템" : "도구"} / {activeTool === "converter" ? "악보 추출" : activeTool === "tempo" ? "템포 랩" : activeTool === "stems" ? "스템 랩" : "설정"}
             </p>
-            <h2>{activeTool === "converter" ? "악보 추출" : activeTool === "tempo" ? "템포 랩" : "설정"}</h2>
+            <h2>{activeTool === "converter" ? "악보 추출" : activeTool === "tempo" ? "템포 랩" : activeTool === "stems" ? "스템 랩" : "설정"}</h2>
           </div>
           <div className="header-note">
             <span
               className={activeTool === "settings" ? "settings" : "blue"}
               aria-hidden="true"
             />
-            {activeTool === "converter" ? "VIDEO TO SCORE" : activeTool === "tempo" ? "DRUM PRACTICE" : "APP SETTINGS"}
+            {activeTool === "converter" ? "VIDEO TO SCORE" : activeTool === "tempo" ? "DRUM PRACTICE" : activeTool === "stems" ? "AI SOURCE SEPARATION" : "APP SETTINGS"}
           </div>
         </header>
 
@@ -606,6 +624,8 @@ function App(): React.JSX.Element {
           </form>
         ) : activeTool === "tempo" ? (
           <TempoPage />
+        ) : activeTool === "stems" ? (
+          <StemLabPage />
         ) : (
           <SettingsPage theme={theme} onThemeChange={setTheme} />
         )}
@@ -632,6 +652,10 @@ function App(): React.JSX.Element {
         ) : activeTool === "settings" ? (
           <footer className="settings-footer">
             테마와 사용자 설정은 현재 기기에 저장됩니다.
+          </footer>
+        ) : activeTool === "stems" ? (
+          <footer className="settings-footer">
+            선택한 파일은 외부 서버로 전송하지 않고 현재 기기에서만 처리됩니다.
           </footer>
         ) : null}
 

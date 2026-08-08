@@ -14,6 +14,9 @@ import type {
   ConversionResult,
   PreviewRequest,
   RoiPreview,
+  StemCapability,
+  StemSeparationRequest,
+  StemSeparationResult,
 } from '../shared/contracts';
 
 const API_EXECUTABLE = process.platform === 'win32' ? 'ytpdf-api.exe' : 'ytpdf-api';
@@ -137,12 +140,32 @@ export class BackendProcess {
     request: ConversionRequest,
     emit: (event: BackendEvent) => void,
   ): Promise<ConversionResult> {
+    return this.startJob('/api/v1/jobs', request, emit);
+  }
+
+  async stemCapability(): Promise<StemCapability> {
+    await this.ensureApi();
+    return this.requestJson<StemCapability>('/api/v1/stems/capability');
+  }
+
+  async startStemSeparation(
+    request: StemSeparationRequest,
+    emit: (event: BackendEvent) => void,
+  ): Promise<StemSeparationResult> {
+    return this.startJob('/api/v1/stems/jobs', request, emit);
+  }
+
+  private async startJob(
+    endpoint: string,
+    request: ConversionRequest | StemSeparationRequest,
+    emit: (event: BackendEvent) => void,
+  ): Promise<ConversionResult> {
     if (this.activeJobId) {
-      throw new Error('이미 변환 작업이 실행 중입니다.');
+      throw new Error('이미 다른 작업이 실행 중입니다.');
     }
 
     await this.ensureApi();
-    const created = await this.requestJson<ApiJob>('/api/v1/jobs', {
+    const created = await this.requestJson<ApiJob>(endpoint, {
       method: 'POST',
       body: JSON.stringify(request),
     });
