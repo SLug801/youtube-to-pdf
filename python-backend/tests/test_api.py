@@ -60,6 +60,23 @@ def test_health_requires_token(tmp_path: Path) -> None:
     assert authorized.json()["engine"]["ready"] is True
 
 
+def test_stem_capability_requires_token(tmp_path: Path) -> None:
+    settings = Settings(api_token="test")
+    app = create_app(settings, JobManager(FakeEngine()))
+
+    with TestClient(app) as client:
+        unauthorized = client.get("/api/v1/stems/capability")
+        authorized = client.get(
+            "/api/v1/stems/capability",
+            headers={"X-YTPDF-Token": "test"},
+        )
+
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 200
+    assert isinstance(authorized.json()["available"], bool)
+    assert authorized.json()["models"] == ["htdemucs", "htdemucs_6s"]
+
+
 def test_preview_requires_token_and_returns_jpeg(tmp_path: Path) -> None:
     work_directory = tmp_path / "sheet_01"
     work_directory.mkdir()

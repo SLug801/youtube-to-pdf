@@ -4,8 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
-from core.models import Background, Motion, RoiConfig
-from core.pipeline import convert_url
+from core.stem_separator import separate_stems
 
 from .schemas import parse_time_seconds
 
@@ -17,6 +16,9 @@ def _run_conversion(
     description: str,
     output_required: bool,
 ) -> int:
+    from core.models import Background, Motion, RoiConfig
+    from core.pipeline import convert_url
+
     parser = argparse.ArgumentParser(prog=program_name, description=description)
     parser.add_argument(
         "--output-directory",
@@ -65,6 +67,24 @@ def run_worker(arguments: list[str]) -> int:
         description="FastAPI가 실행하는 Python 영상 처리 Worker",
         output_required=True,
     )
+
+
+def run_stem_worker(arguments: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="ytpdf-api stem-worker",
+        description="FastAPI가 실행하는 로컬 AI 음원 분리 Worker",
+    )
+    parser.add_argument("--input-path", required=True, type=Path)
+    parser.add_argument("--output-directory", required=True, type=Path)
+    parser.add_argument("--model", choices=["htdemucs", "htdemucs_6s"], default="htdemucs")
+    options = parser.parse_args(arguments)
+    separate_stems(
+        options.input_path.resolve(),
+        options.output_directory.resolve(),
+        model=options.model,
+        logger=lambda message: print(message, flush=True),
+    )
+    return 0
 
 
 def run_cli(arguments: list[str]) -> int:

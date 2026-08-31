@@ -20,6 +20,7 @@ src/
    ├─ image_ops.py       특징 추출·배경 정리
    ├─ downloader.py      yt-dlp 실행
    ├─ preview.py         대표 프레임 생성
+   ├─ stem_separator.py  Demucs 기반 로컬 음원 분리
    ├─ pdf_builder.py     PDF 출력
    ├─ models.py          변환 모드·ROI 모델
    └─ params.py          영상 분석 튜닝값
@@ -38,6 +39,12 @@ uv sync --extra dev
 YTPDF_API_TOKEN=development-token uv run ytpdf-api
 ```
 
+Stem Lab도 실행하려면 선택 의존성을 함께 설치합니다.
+
+```bash
+uv sync --extra dev --extra stem
+```
+
 기본 주소는 `http://127.0.0.1:8765`입니다. 토큰을 설정했다면 모든 요청에
 `X-YTPDF-Token` 헤더를 전달해야 합니다.
 
@@ -46,12 +53,14 @@ YTPDF_API_TOKEN=development-token uv run ytpdf-api
 - `GET /health`: API와 선택된 변환 엔진 준비 상태
 - `POST /api/v1/preview`: ROI 설정용 JPEG 대표 프레임
 - `POST /api/v1/jobs`: 변환 작업 생성
+- `GET /api/v1/stems/capability`: AI 음원 분리 구성요소 준비 상태
+- `POST /api/v1/stems/jobs`: 로컬 음원·영상 분리 작업 생성
 - `GET /api/v1/jobs/{job_id}`: 작업 상태
 - `POST /api/v1/jobs/{job_id}/cancel`: 작업 취소
 - `GET /api/v1/jobs/{job_id}/events`: 로그와 상태를 SSE로 구독
 - `GET /api/v1/jobs/{job_id}/result`: 완료된 PDF 다운로드
 
-영상 변환은 API 프로세스가 아니라 별도 Python Worker 프로세스에서 실행됩니다. 현재 데스크톱
+영상 변환과 음원 분리는 API 프로세스가 아니라 별도 Python Worker 프로세스에서 실행됩니다. 현재 데스크톱
 동작과 동일하게 한 번에 한 작업만 허용합니다. 프리뷰와 변환도 동시에 실행하지 않으며,
 프리뷰가 내려받은 영상은 같은 출력 폴더의 후속 변환에서 재사용합니다.
 

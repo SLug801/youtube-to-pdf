@@ -10,8 +10,18 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
+from core.stem_separator import is_stem_separator_available, stem_result_directory
+
 from .engine import ConversionEngine
-from .schemas import ConversionRequest, JobEvent, JobResponse, JobStatus
+from .schemas import (
+    ConversionRequest,
+    JobEvent,
+    JobResponse,
+    JobStatus,
+    StemSeparationRequest,
+)
+
+JobRequest = ConversionRequest | StemSeparationRequest
 
 
 class EngineUnavailableError(RuntimeError):
@@ -25,9 +35,9 @@ class JobConflictError(RuntimeError):
 @dataclass(slots=True)
 class JobRecord:
     id: UUID
-    request: ConversionRequest
+    request: JobRequest
     status: JobStatus = JobStatus.QUEUED
-    message: str = "변환 작업이 대기 중입니다."
+    message: str = "작업이 대기 중입니다."
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -41,6 +51,7 @@ class JobRecord:
     def response(self) -> JobResponse:
         return JobResponse(
             id=self.id,
+            kind="stems" if isinstance(self.request, StemSeparationRequest) else "score",
             status=self.status,
             message=self.message,
             created_at=self.created_at,
@@ -62,14 +73,19 @@ class JobManager:
     def has_active_job(self) -> bool:
         return any(not job.status.terminal for job in self._jobs.values())
 
-    async def submit(self, request: ConversionRequest) -> JobResponse:
+    async def submit(self, request: JobRequest) -> JobResponse:
         engine_status = self.engine.status()
         if not engine_status.ready:
             raise EngineUnavailableError(engine_status.message)
+        if isinstance(request, StemSeparationRequest) and not is_stem_separator_available():
+            raise EngineUnavailableError(
+                "AI 음원 분리 구성요소가 없습니다. "
+                "python-backend에서 'uv sync --extra stem'을 실행해 주세요."
+            )
 
         async with self._submit_lock:
             if self.has_active_job:
-                raise JobConflictError("현재 다른 변환 작업이 실행 중입니다.")
+                raise JobConflictError("현재 다른 작업이 실행 중입니다.")
             record = JobRecord(id=uuid4(), request=request)
             self._jobs[record.id] = record
             task = asyncio.create_task(self._run(record), name=f"ytpdf-job-{record.id}")
@@ -95,7 +111,7 @@ class JobManager:
             return False, record.response()
 
         record.cancellation_requested = True
-        record.message = "변환 취소를 요청했습니다."
+        record.message = "작업 취소를 요청했습니다."
         await self._emit(record, "log", record.message, stream="stderr")
         if record.process is not None:
             await self._terminate(record.process)
@@ -137,7 +153,10 @@ class JobManager:
         record.status = JobStatus.RUNNING
         record.started_at = datetime.now(UTC)
         engine_status = self.engine.status()
-        record.message = f"{engine_status.kind.capitalize()} 변환 엔진을 시작합니다."
+        task_name = (
+            "음원 분리" if isinstance(record.request, StemSeparationRequest) else "악보 변환"
+        )
+        record.message = f"{engine_status.kind.capitalize()} {task_name} 엔진을 시작합니다."
 
         command = self.engine.command(record.request)
         environment = os.environ.copy()
@@ -161,7 +180,7 @@ class JobManager:
             await self._emit(
                 record,
                 "started",
-                f"{engine_status.kind.capitalize()} Worker 변환을 시작했습니다.",
+                f"{engine_status.kind.capitalize()} Worker {task_name}을 시작했습니다.",
                 pid=process.pid,
             )
 
@@ -177,19 +196,22 @@ class JobManager:
                 await self._finish_cancelled(record)
                 return
 
-            expected_output = (
-                record.request.resolved_output_directory / "sheet_01" / "sheet_01.pdf"
+            expected_output = self._expected_output(record.request)
+            output_exists = (
+                expected_output.is_dir()
+                if isinstance(record.request, StemSeparationRequest)
+                else expected_output.is_file()
             )
-            if record.exit_code == 0 and expected_output.is_file():
+            if record.exit_code == 0 and output_exists:
                 record.status = JobStatus.SUCCEEDED
                 record.output_path = str(expected_output)
-                record.message = "변환이 완료되었습니다."
+                record.message = f"{task_name}이 완료되었습니다."
             elif record.exit_code == 0:
                 record.status = JobStatus.FAILED
-                record.message = "변환 프로세스는 완료됐지만 결과 PDF를 찾을 수 없습니다."
+                record.message = f"{task_name} 프로세스는 완료됐지만 결과를 찾을 수 없습니다."
             else:
                 record.status = JobStatus.FAILED
-                record.message = f"변환 엔진이 종료 코드 {record.exit_code}로 종료되었습니다."
+                record.message = f"작업 엔진이 종료 코드 {record.exit_code}로 종료되었습니다."
             record.finished_at = datetime.now(UTC)
             await self._emit(
                 record,
@@ -201,7 +223,7 @@ class JobManager:
         except Exception as error:
             record.status = JobStatus.FAILED
             record.finished_at = datetime.now(UTC)
-            record.message = f"변환 엔진을 실행할 수 없습니다: {error}"
+            record.message = f"작업 엔진을 실행할 수 없습니다: {error}"
             await self._emit(
                 record,
                 "finished",
@@ -212,6 +234,16 @@ class JobManager:
             )
         finally:
             record.process = None
+
+    @staticmethod
+    def _expected_output(request: JobRequest) -> Path:
+        if isinstance(request, StemSeparationRequest):
+            return stem_result_directory(
+                request.resolved_input_path,
+                request.resolved_output_directory,
+                request.model,
+            )
+        return request.resolved_output_directory / "sheet_01" / "sheet_01.pdf"
 
     async def _forward_lines(
         self,
@@ -226,7 +258,7 @@ class JobManager:
     async def _finish_cancelled(self, record: JobRecord) -> None:
         record.status = JobStatus.CANCELLED
         record.finished_at = datetime.now(UTC)
-        record.message = "변환을 취소했습니다."
+        record.message = "작업을 취소했습니다."
         await self._emit(
             record,
             "finished",

@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from importlib.util import find_spec
 from typing import Protocol
 
-from .schemas import ConversionRequest, EngineStatus
+from .schemas import ConversionRequest, EngineStatus, StemSeparationRequest
 from .settings import Settings
 
 
 class ConversionEngine(Protocol):
     def status(self) -> EngineStatus: ...
 
-    def command(self, request: ConversionRequest) -> list[str]: ...
+    def command(self, request: ConversionRequest | StemSeparationRequest) -> list[str]: ...
 
     def environment(self) -> dict[str, str]: ...
 
@@ -35,12 +35,27 @@ class PythonEngine:
             engine_path=sys.executable,
         )
 
-    def command(self, request: ConversionRequest) -> list[str]:
+    def command(self, request: ConversionRequest | StemSeparationRequest) -> list[str]:
         command = (
-            [sys.executable, "worker"]
+            [sys.executable]
             if getattr(sys, "frozen", False)
-            else [sys.executable, "-m", "api", "worker"]
+            else [sys.executable, "-m", "api"]
         )
+        if isinstance(request, StemSeparationRequest):
+            command.extend(
+                [
+                    "stem-worker",
+                    "--input-path",
+                    str(request.resolved_input_path),
+                    "--output-directory",
+                    str(request.resolved_output_directory),
+                    "--model",
+                    request.model,
+                ]
+            )
+            return command
+
+        command.append("worker")
         command.extend(
             [
                 "--output-directory",

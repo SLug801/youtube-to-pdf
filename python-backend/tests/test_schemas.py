@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from api.schemas import ConversionRequest, parse_time_seconds
+from api.schemas import ConversionRequest, StemSeparationRequest, parse_time_seconds
 
 
 @pytest.mark.parametrize(
@@ -37,3 +37,20 @@ def test_conversion_request_resolves_output_directory(tmp_path: Path) -> None:
 
     assert request.resolved_output_directory == tmp_path.resolve()
 
+
+def test_stem_request_accepts_local_audio_and_rejects_unknown_file(tmp_path: Path) -> None:
+    audio = tmp_path / "practice.wav"
+    audio.touch()
+    request = StemSeparationRequest(
+        inputPath=audio,
+        outputDirectory=tmp_path,
+        model="htdemucs_6s",
+    )
+
+    assert request.resolved_input_path == audio.resolve()
+    assert request.model == "htdemucs_6s"
+
+    unsupported = tmp_path / "practice.txt"
+    unsupported.touch()
+    with pytest.raises(ValidationError, match="지원하는 음원"):
+        StemSeparationRequest(inputPath=unsupported, outputDirectory=tmp_path)
